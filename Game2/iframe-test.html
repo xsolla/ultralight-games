@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Iframe Scale Test</title>
+  <style>
+    body {
+      margin: 0;
+      background: #111;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      min-height: 100vh;
+      gap: 12px;
+      font-family: sans-serif;
+      color: #888;
+    }
+
+    p {
+      margin: 0;
+      font-size: 13px;
+      letter-spacing: 0.04em;
+    }
+
+    /* Wrapper gives the overlay something to anchor to */
+    #frame-wrapper {
+      position: relative;
+      width: 400px;
+      height: 300px;
+      flex-shrink: 0;
+    }
+
+    #frame-small {
+      width: 400px;
+      height: 300px;
+      border: 1px solid #333;
+      display: block;
+    }
+
+    /* Transparent div on top of the iframe — captures clicks in the parent doc */
+    #click-catcher {
+      position: absolute;
+      inset: 0;
+      cursor: pointer;
+      z-index: 1;
+    }
+
+    /* Backdrop shown when expanded */
+    #backdrop {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.7);
+      z-index: 10;
+    }
+
+    /* Expanded iframe, centered */
+    #frame-large {
+      display: none;
+      position: fixed;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      width: 800px;
+      height: 600px;
+      border: none;
+      z-index: 11;
+    }
+  </style>
+</head>
+<body>
+  <p>Click the game to expand · click outside to collapse</p>
+
+  <div id="frame-wrapper">
+    <iframe id="frame-small" src="index.html" scrolling="no"></iframe>
+    <div id="click-catcher"></div>
+  </div>
+
+  <iframe id="frame-large" src="" scrolling="no"></iframe>
+  <div id="backdrop"></div>
+
+  <script>
+    const wrapper  = document.getElementById('frame-wrapper');
+    const large    = document.getElementById('frame-large');
+    const backdrop = document.getElementById('backdrop');
+    const catcher  = document.getElementById('click-catcher');
+
+    function expand() {
+      if (!large.src || large.src === window.location.href) {
+        large.src = 'index.html';
+      }
+      wrapper.style.display  = 'none';
+      large.style.display    = 'block';
+      backdrop.style.display = 'block';
+    }
+
+    function collapse() {
+      large.style.display    = 'none';
+      backdrop.style.display = 'none';
+      wrapper.style.display  = 'block';
+    }
+
+    catcher.addEventListener('click', expand);
+    backdrop.addEventListener('click', collapse);
+  </script>
+</body>
+</html>

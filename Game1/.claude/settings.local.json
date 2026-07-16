@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(Get-ChildItem -Path \"D:\\\\XsollaProjects\\\\OverlayGame1\" -Recurse -File | Select-Object @{Name='Path';Expression={$_.FullName}} | Format-Table -HideTableHeaders)"
+    ]
+  }
+}

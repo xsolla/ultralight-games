@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(Start-Process \"D:\\\\XsollaProjects\\\\OverlayGame2\\\\index.html\")",
+      "PowerShell(node --check \"D:\\\\XsollaProjects\\\\OverlayGame2\\\\game.js\"; if \\($?\\) { \"OK: syntax valid\" })",
+      "PowerShell($g = Get-Content \"D:\\\\XsollaProjects\\\\OverlayGame2\\\\game.js\"; \"game.js lines: $\\($g.Count\\)\"; \\(Get-Item \"D:\\\\XsollaProjects\\\\OverlayGame2\\\\game.js\"\\).LastWriteTime)",
+      "PowerShell($node = \\(Get-Command node -ErrorAction SilentlyContinue\\); if \\($node\\) { node --check \"D:\\\\XsollaProjects\\\\OverlayGame2\\\\game.js\"; if \\($?\\) { \"SYNTAX OK\" } } else { \"node not installed\" })"
+    ]
+  }
+}

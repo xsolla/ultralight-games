@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Skill(run)",
+      "PowerShell($c = Get-Command chromium-cli -ErrorAction SilentlyContinue; if \\($c\\) { $c.Source } else { \"no chromium-cli\" }; $p = Get-Command python -ErrorAction SilentlyContinue; if \\($p\\) { \"python: \" + $p.Source } else { \"no python\" })",
+      "PowerShell(Get-ChildItem -Recurse -File | Where-Object { $_.Extension -in '.js','.html','.css' } | Select-Object FullName, @{N='Lines';E={\\(Get-Content $_.FullName | Measure-Object -Line\\).Lines}} | Sort-Object FullName | Format-Table -AutoSize)",
+      "PowerShell($ErrorActionPreference='Continue'; node --check js/audio.js; if \\($?\\) { \"audio.js OK\" }; node --check js/game.js; if \\($?\\) { \"game.js OK\" })",
+      "PowerShell(foreach \\($c in 'node','python','py','deno','bun'\\) { $g = Get-Command $c -ErrorAction SilentlyContinue; if \\($g\\) { \"$c -> $\\($g.Source\\)\" } })"
+    ]
+  }
+}

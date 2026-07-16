@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Xsolla Hexxagon</title>
+  <link rel="stylesheet" href="css/styles.css" />
+</head>
+<body>
+  <!-- Fixed native resolution 800x600; CSS scales it responsively. -->
+  <canvas id="game" width="800" height="600"></canvas>
+
+  <!-- Load order: constants -> shared geometry -> data -> render -> game. -->
+  <script src="js/constants.js"></script>
+  <script src="js/hex.js"></script>
+  <script src="js/board.js"></script>
+  <script src="js/render.js"></script>
+  <script src="js/ambiance.js"></script>
+  <script src="js/menu.js"></script>
+  <script src="js/rules.js"></script>
+  <script src="js/ai.js"></script>
+  <script src="js/audio.js"></script>
+  <script src="js/game.js"></script>
+</body>
+</html>

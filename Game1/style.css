@@ -1,0 +1,41 @@
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: #1a1a2e;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 100vh;
+  font-family: sans-serif;
+}
+
+.game-wrapper {
+  position: relative;
+  width: 800px;
+  max-width: 100vw;
+  line-height: 0;
+  border-radius: 6px;
+  box-shadow:
+    0 0 0 2px #2a2a4a,
+    0 0 0 4px #0f3460,
+    0 8px 40px rgba(0, 0, 0, 0.7);
+  overflow: hidden;
+}
+
+#gameCanvas {
+  display: block;
+  width: 100%;
+  image-rendering: crisp-edges;
+  image-rendering: pixelated;
+  cursor: crosshair;
+}
+
+@media (min-width: 1200px) {
+  .game-wrapper {
+    width: 800px;
+    max-width: 1200px;
+  }
+}
