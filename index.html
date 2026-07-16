@@ -116,8 +116,9 @@
     margin: 40px auto 0;
     padding: 0 24px;
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(230px, 260px));
     gap: 26px;
+    justify-content: center;
   }
 
   .card {
@@ -308,7 +309,7 @@
   <main id="gallery" class="gallery"></main>
   <p id="emptyState" hidden>No games found in this folder yet.</p>
 
-  <footer>Static HTML &amp; JS, no build step. Games run standalone or embedded here in an iframe.</footer>
+  <footer>These games were created for the Xsolla Overlay project by Pavel Elizarov.</footer>
 
   <div id="player" class="player-overlay" hidden>
     <div class="player-topbar">
