@@ -25,12 +25,21 @@
   }
 
   body {
-    background:
-      radial-gradient(1200px 600px at 50% -10%, #1c2036 0%, var(--bg-0) 55%),
-      var(--bg-0);
+    background: var(--bg-0);
     color: var(--text-0);
     font-family: "Segoe UI", system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif;
     padding: 0 0 64px;
+  }
+
+  #starfield {
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    display: block;
+    pointer-events: none;
+    background:
+      radial-gradient(1200px 600px at 50% -10%, #1c2036 0%, var(--bg-0) 55%),
+      var(--bg-0);
   }
 
   header {
@@ -281,6 +290,7 @@
 </style>
 </head>
 <body>
+  <canvas id="starfield" aria-hidden="true"></canvas>
 
   <header>
     <h1>Xsolla <span class="accent">Ultralight</span> Games</h1>
@@ -310,6 +320,7 @@
     </div>
   </div>
 
+  <script src="starfield.js" defer></script>
   <script src="app.js" defer></script>
 </body>
 </html>
