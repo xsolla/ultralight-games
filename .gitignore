@@ -1,0 +1,44 @@
+# Personal/machine-specific overrides (model choice, extra allowed dirs, etc.)
+# Claude Code based projects gitignore.
+.claude/settings.local.json
+
+# Legacy global config if it ever ends up inside a project folder
+.claude.json
+
+# NOTE: do NOT ignore these — they're meant to be shared with your team:
+#   .claude/settings.json   (shared project permissions/config)
+#   .claude/CLAUDE.md or CLAUDE.md  (project instructions for Claude)
+#   .claudeignore           (tells Claude which files to skip reading)
+
+# ===== Secrets & environment =====
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+.aws/
+.ssh/
+
+# ===== Dependencies =====
+node_modules/
+vendor/
+.venv/
+venv/
+__pycache__/
+*.pyc
+
+# ===== Build output =====
+dist/
+build/
+out/
+*.log
+
+# ===== OS files =====
+.DS_Store
+Thumbs.db
+
+# ===== Editor/IDE =====
+.vscode/
+.idea/
+*.swp
