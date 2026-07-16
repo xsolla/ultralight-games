@@ -1,0 +1,315 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Xsolla Ultralight Games</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%8E%AE%3C/text%3E%3C/svg%3E">
+<style>
+  :root {
+    --bg-0: #0a0b10;
+    --bg-1: #12141c;
+    --bg-2: #1a1d29;
+    --border: #262a3a;
+    --text-0: #eef0f7;
+    --text-1: #9aa0b4;
+    --accent: #7c8cff;
+    --accent-2: #33e0c9;
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0;
+    min-height: 100%;
+  }
+
+  body {
+    background:
+      radial-gradient(1200px 600px at 50% -10%, #1c2036 0%, var(--bg-0) 55%),
+      var(--bg-0);
+    color: var(--text-0);
+    font-family: "Segoe UI", system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif;
+    padding: 0 0 64px;
+  }
+
+  header {
+    text-align: center;
+    padding: clamp(32px, 6vw, 64px) 20px 12px;
+  }
+
+  header h1 {
+    margin: 0;
+    font-size: clamp(28px, 5vw, 48px);
+    letter-spacing: 0.5px;
+    font-weight: 800;
+  }
+
+  header h1 .accent {
+    background: linear-gradient(120deg, var(--accent), var(--accent-2));
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+
+  header p.sub {
+    margin: 10px auto 0;
+    max-width: 560px;
+    color: var(--text-1);
+    font-size: clamp(13px, 1.6vw, 16px);
+  }
+
+  .toolbar {
+    display: flex;
+    justify-content: center;
+    margin-top: 18px;
+  }
+
+  #rescanBtn {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    background: var(--bg-2);
+    border: 1px solid var(--border);
+    color: var(--text-0);
+    padding: 9px 16px;
+    border-radius: 999px;
+    font-size: 13px;
+    cursor: pointer;
+    transition: border-color 150ms ease, transform 150ms ease;
+  }
+  #rescanBtn:hover { border-color: var(--accent); }
+  #rescanBtn:active { transform: scale(0.97); }
+  #rescanBtn .spin { display: inline-block; transition: transform 400ms ease; }
+  #rescanBtn.busy .spin { animation: spin 800ms linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  #fileNotice {
+    max-width: 640px;
+    margin: 22px auto 0;
+    padding: 12px 16px;
+    background: #2a2210;
+    border: 1px solid #4a3a12;
+    color: #f3d896;
+    border-radius: 10px;
+    font-size: 13px;
+    line-height: 1.5;
+    text-align: center;
+  }
+  #fileNotice code {
+    background: rgba(0,0,0,0.25);
+    padding: 1px 6px;
+    border-radius: 5px;
+  }
+
+  main.gallery {
+    max-width: 1180px;
+    margin: 40px auto 0;
+    padding: 0 24px;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+    gap: 26px;
+  }
+
+  .card {
+    appearance: none;
+    background: var(--bg-1);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 0;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    transition: transform 200ms ease, border-color 200ms ease, box-shadow 200ms ease;
+  }
+  .card:hover, .card:focus-visible {
+    transform: translateY(-6px);
+    border-color: var(--accent);
+    box-shadow: 0 16px 40px rgba(0,0,0,0.45), 0 0 0 1px rgba(124,140,255,0.25);
+    outline: none;
+  }
+
+  .card-media {
+    position: relative;
+    aspect-ratio: 4 / 3;
+    background: var(--bg-2);
+    overflow: hidden;
+  }
+  .card-media img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+    transition: transform 300ms ease;
+  }
+  .card:hover .card-media img { transform: scale(1.06); }
+
+  .card-noimg {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-1);
+    font-size: 14px;
+    padding: 12px;
+    text-align: center;
+  }
+
+  .card-play {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(10,11,16,0.35);
+    opacity: 0;
+    transition: opacity 200ms ease;
+  }
+  .card:hover .card-play, .card:focus-visible .card-play { opacity: 1; }
+  .card-play span {
+    width: 56px;
+    height: 56px;
+    border-radius: 50%;
+    background: rgba(20,22,32,0.75);
+    border: 1px solid rgba(255,255,255,0.25);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 20px;
+    color: #fff;
+  }
+
+  .card-title {
+    padding: 14px 16px 16px;
+    font-size: 15px;
+    font-weight: 600;
+  }
+
+  /* loading skeleton */
+  .skeleton .card-media { position: relative; overflow: hidden; }
+  .skeleton .card-media::after {
+    content: "";
+    position: absolute; inset: 0;
+    background: linear-gradient(100deg, transparent 30%, rgba(255,255,255,0.06) 50%, transparent 70%);
+    background-size: 200% 100%;
+    animation: shimmer 1.3s infinite;
+  }
+  .skeleton .card-title {
+    height: 15px;
+    margin: 14px 16px 16px;
+    padding: 0;
+    background: rgba(255,255,255,0.06);
+    border-radius: 6px;
+  }
+  @keyframes shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+
+  #emptyState {
+    text-align: center;
+    color: var(--text-1);
+    margin-top: 60px;
+    font-size: 15px;
+  }
+  #emptyState[hidden] { display: none; }
+
+  /* player overlay */
+  .player-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(6,7,11,0.88);
+    backdrop-filter: blur(4px);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    z-index: 100;
+    padding: 16px;
+  }
+  .player-overlay[hidden] { display: none; }
+
+  .player-topbar {
+    width: min(96vw, 1200px);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 10px;
+    color: var(--text-0);
+  }
+  .player-topbar span { font-weight: 600; font-size: 15px; }
+
+  #closePlayer {
+    background: var(--bg-2);
+    border: 1px solid var(--border);
+    color: var(--text-0);
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    cursor: pointer;
+    font-size: 16px;
+    line-height: 1;
+    transition: border-color 150ms ease, background 150ms ease;
+  }
+  #closePlayer:hover { border-color: var(--accent); background: #20243380; }
+
+  .player-frame-box {
+    width: min(96vw, 1200px);
+    height: min(80vh, 900px);
+    aspect-ratio: 4 / 3;
+    background: #000;
+    border-radius: 14px;
+    overflow: hidden;
+    border: 1px solid var(--border);
+    box-shadow: 0 24px 80px rgba(0,0,0,0.6);
+  }
+  .player-frame-box iframe {
+    width: 100%;
+    height: 100%;
+    border: none;
+    display: block;
+  }
+
+  footer {
+    text-align: center;
+    color: var(--text-1);
+    font-size: 12px;
+    margin-top: 50px;
+  }
+</style>
+</head>
+<body>
+
+  <header>
+    <h1>Xsolla <span class="accent">Ultralight</span> Games</h1>
+    <p class="sub">A gallery of lightweight, framework-free HTML5 canvas games. Click a title to play.</p>
+    <div class="toolbar">
+      <button id="rescanBtn" type="button"><span class="spin">&#8635;</span> Rescan</button>
+    </div>
+    <div id="fileNotice" hidden>
+      This page was opened directly from disk (<code>file://</code>), so the browser blocks the
+      requests used to auto-discover games. Serve this folder over HTTP instead, e.g.
+      <code>python -m http.server 8000</code>, then open the printed <code>localhost</code> address.
+    </div>
+  </header>
+
+  <main id="gallery" class="gallery"></main>
+  <p id="emptyState" hidden>No games found in this folder yet.</p>
+
+  <footer>Static HTML &amp; JS, no build step. Games run standalone or embedded here in an iframe.</footer>
+
+  <div id="player" class="player-overlay" hidden>
+    <div class="player-topbar">
+      <span id="playerTitle"></span>
+      <button id="closePlayer" type="button" aria-label="Close">&#10005;</button>
+    </div>
+    <div class="player-frame-box">
+      <iframe id="playerFrame" title="Game player"></iframe>
+    </div>
+  </div>
+
+  <script src="app.js" defer></script>
+</body>
+</html>
