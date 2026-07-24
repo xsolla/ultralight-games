@@ -616,6 +616,16 @@ const Game = {
     if (well.pendingGarbage > 0) {
       this.insertGarbageWithAnim(well, well.pendingGarbage);
       well.pendingGarbage = 0;
+
+      // Garbage shifts the whole settled stack up — that can bury the
+      // spawn column before the currently-falling piece ever locks, so
+      // top-out has to be checked right here, not just after the next
+      // chain resolves.
+      if (Rules.isTopOut(well.grid, PIECE.SPAWN_COL)) {
+        well.toppedOut = true;
+        if (well.onChainDone) well.onChainDone(0);
+        return;
+      }
     }
 
     well.fallTimerMs += dt;

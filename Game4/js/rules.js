@@ -18,7 +18,14 @@ const Rules = {
     return N > GARBAGE.THRESHOLD ? Math.floor((N - GARBAGE.THRESHOLD) / GARBAGE.STEP) : 0;
   },
 
+  // A piece spawns fully inside the well, occupying rows 0..LENGTH-1 of the
+  // spawn column — so top-out means any of those cells is already taken,
+  // not just row 0 (garbage insertion can leave rows 1/2 occupied while
+  // row 0 is still clear).
   isTopOut(grid, spawnCol) {
-    return !!grid[0][spawnCol];
+    for (let i = 0; i < PIECE.LENGTH; i++) {
+      if (grid[i][spawnCol]) return true;
+    }
+    return false;
   },
 };
