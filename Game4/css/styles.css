@@ -1,0 +1,26 @@
+html, body {
+  margin: 0;
+  height: 100%;
+  background: #030304;
+  overflow: hidden;
+}
+
+#game-wrap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100vh;
+}
+
+#game-canvas {
+  aspect-ratio: 4 / 3;
+  width: min(100vw, 133.33vh);
+  max-width: 1200px;
+  max-height: 900px;
+  background: #020203;
+  border-radius: 10px;
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.55);
+  cursor: pointer;
+  user-select: none;
+  touch-action: none;
+}
