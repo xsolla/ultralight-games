@@ -1653,6 +1653,38 @@ function drawHUD(ctx) {
 const canvas = document.getElementById('gameCanvas');
 const ctx    = canvas.getContext('2d');
 
+// ─── Backing-store resolution ───────────────────────────────────────────────
+// The canvas element stays 800x600 CSS px; scale.js scales #game-root (and with
+// it this canvas and every DOM overlay) via transform. What changes here is the
+// canvas's BACKING STORE, which is sized to the real device pixels the element
+// covers, so the game renders at native resolution instead of being upscaled
+// from a fixed 800x600 bitmap.
+//
+// No drawing code changes: the base transform below maps the 800x600 logical
+// space onto the larger buffer. Safe because nothing in this file resets the
+// transform (the only translate/rotate uses are inside save/restore pairs), no
+// gradient is cached across frames, and clientToCanvasX() already derives its
+// mapping from getBoundingClientRect().
+//
+// Capped because this is the most stroke-heavy renderer of the four games
+// (hundreds of procedurally drawn figures per frame); past 2x the fill-rate cost
+// outweighs the sharpness gain.
+const MAX_BACKING_SCALE = 2;
+
+function resizeCanvas() {
+  const rect = canvas.getBoundingClientRect();   // reflects scale.js's transform
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  const k = Math.min(((rect.width || CANVAS_W) / CANVAS_W) * dpr, MAX_BACKING_SCALE);
+  const bw = Math.max(1, Math.round(CANVAS_W * k));
+  const bh = Math.max(1, Math.round(CANVAS_H * k));
+  if (canvas.width !== bw || canvas.height !== bh) {
+    canvas.width  = bw;
+    canvas.height = bh;
+  }
+  // Setting width/height resets the context, so (re)apply the logical scale.
+  ctx.setTransform(bw / CANVAS_W, 0, 0, bh / CANVAS_H, 0, 0);
+}
+
 const Input = { left: false, right: false, mouseDown: false, mouseX: 0 };
 
 const lbModal     = document.getElementById('leaderboardModal');
@@ -1690,8 +1722,71 @@ const exitBtn = document.getElementById('exitBtn');
 if (exitBtn) {
   exitBtn.innerHTML = `<svg viewBox="0 0 30 30" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M19.282 10.244 A6.4 6.4 0 1 1 10.718 10.244"></path><path d="M15 6.6 L15 14.6"></path></svg>`;
 }
-function showExit() { if (exitBtn) exitBtn.hidden = false; }
-function hideExit() { if (exitBtn) exitBtn.hidden = true;  }
+function showExit() { if (exitBtn) exitBtn.hidden = false; layoutHudColumn(); }
+function hideExit() { if (exitBtn) exitBtn.hidden = true;  layoutHudColumn(); }
+
+// ─── Fullscreen ─────────────────────────────────────────────────────────────
+// Unlike the other games, this button is also available on the title screen —
+// the sound button already is, since both live in the DOM above the overlays.
+const fullscreenBtn = document.getElementById('fullscreenBtn');
+
+// Keep the HUD column contiguous. Exit only exists during a run, so when it is
+// hidden the fullscreen button moves up into its slot rather than leaving a gap.
+function layoutHudColumn() {
+  if (!fullscreenBtn) return;
+  fullscreenBtn.style.top = (exitBtn && !exitBtn.hidden) ? '88px' : '52px';
+}
+
+// 30-unit viewBox, so 1 SVG unit = 1 logical px — the same corner-bracket
+// geometry the canvas games draw (center 15,15, nominal half-size s=8, bracket
+// extent 0.8s = 6.4, arm 0.42s). Corners on the outside with arms reaching in =
+// "enter"; corners inset with arms reaching out to the edges = "exit".
+const FULLSCREEN_ICONS = {
+  enter: `<svg viewBox="0 0 30 30" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M11.96 8.6 H8.6 V11.96"/>
+    <path d="M18.04 8.6 H21.4 V11.96"/>
+    <path d="M18.04 21.4 H21.4 V18.04"/>
+    <path d="M11.96 21.4 H8.6 V18.04"/>
+  </svg>`,
+  exit: `<svg viewBox="0 0 30 30" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M8.6 11.96 H11.96 V8.6"/>
+    <path d="M21.4 11.96 H18.04 V8.6"/>
+    <path d="M21.4 18.04 H18.04 V21.4"/>
+    <path d="M8.6 18.04 H11.96 V21.4"/>
+  </svg>`,
+};
+
+// Read live from the document rather than tracked in a field, so leaving
+// fullscreen with Esc or F11 keeps the button glyph in sync for free.
+function isFullscreen() {
+  return !!(document.fullscreenElement || document.webkitFullscreenElement);
+}
+
+function updateFullscreenButton() {
+  if (!fullscreenBtn) return;
+  const on = isFullscreen();
+  fullscreenBtn.innerHTML = on ? FULLSCREEN_ICONS.exit : FULLSCREEN_ICONS.enter;
+  const label = on ? 'Exit fullscreen' : 'Fullscreen';
+  fullscreenBtn.title = label;
+  fullscreenBtn.setAttribute('aria-label', label);
+}
+
+// The <html> element goes fullscreen, not #game-root: the UA stylesheet forces a
+// fullscreen element to width/height 100% !important, which would fight
+// #game-root's fixed 800x600 box and the transform-based scaling built on it.
+// Making the viewport the screen instead lets scale.js do the work unchanged.
+function toggleFullscreen() {
+  if (isFullscreen()) {
+    const exit = document.exitFullscreen || document.webkitExitFullscreen;
+    if (exit) { const p = exit.call(document); if (p && p.catch) p.catch(() => {}); }
+    return;
+  }
+  const el = document.documentElement;
+  const req = el.requestFullscreen || el.webkitRequestFullscreen;
+  // Rejects when the embedding page withholds allow="fullscreen" — ignore it
+  // rather than throwing an unhandled rejection into the console.
+  if (req) { const p = req.call(el); if (p && p.catch) p.catch(() => {}); }
+}
 
 function renderScoreRows(listEl, scores, highlightRank) {
   listEl.innerHTML = '';
@@ -1723,6 +1818,7 @@ document.getElementById('titleBtn').addEventListener('click', () => { playSound(
 document.getElementById('playAgainBtn').addEventListener('click', () => { playSound('button'); hideLeaderboard(); startGame(); });
 document.getElementById('soundBtn').addEventListener('click', () => { cycleMuteState(); playSound('button'); });
 if (exitBtn) exitBtn.addEventListener('click', () => { playSound('button'); startTitleDemo(); });
+if (fullscreenBtn) fullscreenBtn.addEventListener('click', () => { playSound('button'); toggleFullscreen(); });
 
 function clientToCanvasX(clientX) {
   const rect = canvas.getBoundingClientRect();
@@ -2524,5 +2620,22 @@ function frame(timestamp) {
 
 initAudio();
 initSky();
+resizeCanvas();
+updateFullscreenButton();
+layoutHudColumn();
+
+// scale.js changes the element's rendered size on both of these, so the backing
+// store has to be rebuilt to match. fullscreenchange can fire before layout has
+// settled on the new box, so re-measure next frame too — otherwise exiting
+// leaves the backing store at its fullscreen size.
+window.addEventListener('resize', resizeCanvas);
+const onFullscreenChange = () => {
+  updateFullscreenButton();
+  resizeCanvas();
+  requestAnimationFrame(resizeCanvas);
+};
+document.addEventListener('fullscreenchange', onFullscreenChange);
+document.addEventListener('webkitfullscreenchange', onFullscreenChange);
+
 startTitleDemo();
 requestAnimationFrame(frame);

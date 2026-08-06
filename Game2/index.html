@@ -25,12 +25,14 @@
       flex: none;
       transform-origin: center center;
     }
+    /* The element stays 800x600 CSS px (scale.js scales #game-root, and with it
+       this canvas). The backing store is sized to the real pixels it covers by
+       resizeCanvas() in game.js, so no image-rendering hint is wanted here —
+       there is no upscaling left to make crisp. */
     canvas {
       display: block;
       width: 800px;
       height: 600px;
-      image-rendering: crisp-edges;
-      image-rendering: pixelated;
     }
 
     .modal-overlay {
@@ -182,7 +184,7 @@
        vertically 28px in from the right edge, sound above exit with a 6px gap.
        #game-root is exactly 800x600 and scale.js scales the whole subtree, so
        these px offsets land on the same logical coordinates as canvas pixels. */
-    #soundBtn, #exitBtn {
+    #soundBtn, #exitBtn, #fullscreenBtn {
       position: absolute;
       right: 28px;
       width: 30px;
@@ -200,16 +202,19 @@
     }
     #soundBtn { top: 16px; }
     #exitBtn  { top: 52px; color: #8aa0bd; }
+    /* Sits below exit during a run; layoutHudColumn() in game.js moves it up
+       into exit's slot whenever exit is hidden, so the column stays contiguous. */
+    #fullscreenBtn { top: 88px; color: #8aa0bd; }
     /* Must stay — display:flex above would otherwise defeat the hidden attr. */
     #exitBtn[hidden] { display: none; }
-    #soundBtn:hover, #exitBtn:hover {
+    #soundBtn:hover, #exitBtn:hover, #fullscreenBtn:hover {
       background: rgba(255, 255, 255, 0.09);
       border-color: rgba(150, 180, 220, 0.55);
     }
     /* 30-unit viewBox at 30px, so 1 SVG unit = 1 logical px and the icon paths
        are the reference's own numbers. Overflows the 28px content box by 1px a
        side, which centers the artwork on the border box exactly as on canvas. */
-    #soundBtn svg, #exitBtn svg { width: 30px; height: 30px; flex: none; display: block; }
+    #soundBtn svg, #exitBtn svg, #fullscreenBtn svg { width: 30px; height: 30px; flex: none; display: block; }
 
     /* Xsolla wordmark, top-left of the title screen. Mirrors the HUD button
        column on the right: same 28px inset, same y. */
@@ -250,6 +255,7 @@
 
   <button id="exitBtn" type="button" aria-label="Exit to title" title="Exit to title" hidden></button>
   <button id="soundBtn" type="button" aria-label="Sound"></button>
+  <button id="fullscreenBtn" type="button" aria-label="Fullscreen" title="Fullscreen"></button>
   </div><!-- /#game-root -->
 
   <script src="scale.js"></script>
