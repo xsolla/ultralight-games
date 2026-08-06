@@ -7,8 +7,17 @@
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <div class="game-wrapper">
-    <canvas id="gameCanvas" width="800" height="600"></canvas>
+  <div class="game-shell">
+    <div class="game-wrapper">
+      <canvas id="gameCanvas" width="800" height="600"></canvas>
+    </div>
+    <!-- HUD buttons live outside the frame so they can never swallow a click
+         meant for a bubble. Icons are injected by game.js. -->
+    <div class="hud-column">
+      <button id="soundBtn" type="button" aria-label="Sound"></button>
+      <button id="exitBtn" type="button" aria-label="End run" title="End run" hidden></button>
+      <button id="fullscreenBtn" type="button" aria-label="Fullscreen" title="Fullscreen"></button>
+    </div>
   </div>
   <script src="game.js" defer></script>
 </body>

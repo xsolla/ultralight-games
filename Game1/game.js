@@ -86,6 +86,51 @@ const COMPLETE_MESSAGES = {
   zen:    "Ensless popping requres inner strength from a samurai!",
 };
 
+// ─── HUD button icons ─────────────────────────────────────────────────────────
+// A 30-unit viewBox at the buttons' fixed 30px size means 1 SVG unit = 1 px, so
+// every number here is the same arithmetic the canvas-drawn games use (center
+// 15,15, nominal half-size s=8). Injected from JS rather than written into
+// index.html so that file never contains both an <svg> and a <script> tag, which
+// the mini-app validator flags as XSS (same reason as Game2).
+const MAX_BACKING_SCALE = 2;  // cap on backing-store pixels per logical pixel
+
+const HUD_ICONS = {
+  sound: {
+    on: `<svg viewBox="0 0 30 30" aria-hidden="true">
+      <path d="M8.2 13 H11 L14.6 10.2 V19.8 L11 17 H8.2 Z" fill="currentColor"/>
+      <path d="M17.965 12.165 A4.4 4.4 0 0 1 17.965 17.835" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+      <path d="M20.413 10.104 A7.6 7.6 0 0 1 20.413 19.896" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+    </svg>`,
+    musicoff: `<svg viewBox="0 0 30 30" aria-hidden="true">
+      <ellipse cx="11.56" cy="19" rx="2.4" ry="1.76" transform="rotate(-22.918 11.56 19)" fill="currentColor"/>
+      <path d="M13.8 19 L13.8 10.2 L17.8 11.8" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+      <path d="M7.8 22.2 L22.2 7.8" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+    </svg>`,
+    off: `<svg viewBox="0 0 30 30" aria-hidden="true">
+      <path d="M8.2 13 H11 L14.6 10.2 V19.8 L11 17 H8.2 Z" fill="currentColor"/>
+      <path d="M16.6 11 L22.2 19 M22.2 11 L16.6 19" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+    </svg>`,
+  },
+  // Power symbol: a ring with an 84-degree gap at the top and a bar through it.
+  power: `<svg viewBox="0 0 30 30" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+    <path d="M19.282 10.244 A6.4 6.4 0 1 1 10.718 10.244"/>
+    <path d="M15 6.6 L15 14.6"/>
+  </svg>`,
+  // Corner brackets: outward = enter fullscreen, inward = exit.
+  fullscreenEnter: `<svg viewBox="0 0 30 30" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M11.96 8.6 H8.6 V11.96"/>
+    <path d="M18.04 8.6 H21.4 V11.96"/>
+    <path d="M18.04 21.4 H21.4 V18.04"/>
+    <path d="M11.96 21.4 H8.6 V18.04"/>
+  </svg>`,
+  fullscreenExit: `<svg viewBox="0 0 30 30" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M8.6 11.96 H11.96 V8.6"/>
+    <path d="M21.4 11.96 H18.04 V8.6"/>
+    <path d="M21.4 18.04 H18.04 V21.4"/>
+    <path d="M8.6 18.04 H11.96 V21.4"/>
+  </svg>`,
+};
+
 // ─── Xsolla wordmark ──────────────────────────────────────────────────────────
 // Traced verbatim from common_assets/xsolla_logo/new-logo-dark.svg (viewBox
 // 0 0 171 46). Kept as path data rather than an <img>/asset file so the game
@@ -131,10 +176,9 @@ const Game = {
   recordsOkRect: null,
   recordsOkHovered: false,
   soundState: 'on',     // 'on' | 'musicoff' (sfx only) | 'off'
-  hudSoundRect: null,
-  hudEndRect: null,
-  hudSoundHovered: false,
-  hudEndHovered: false,
+  soundBtn: null,       // DOM HUD buttons, in a column outside the game frame
+  exitBtn: null,
+  fullscreenBtn: null,
   bgm: null,
   bgmFading: false,
   bgmFadeRate: 0,
@@ -172,6 +216,20 @@ const Game = {
   init() {
     this.canvas = document.getElementById('gameCanvas');
     this.ctx    = this.canvas.getContext('2d');
+
+    this.initHudButtons();
+    this.resizeCanvas();
+    window.addEventListener('resize', () => this.resizeCanvas());
+    // Entering/leaving fullscreen resizes the frame and so the backing store. The
+    // event can fire before layout has settled on the new box, so re-measure next
+    // frame too — otherwise exiting leaves the buffer at its fullscreen size.
+    const onFullscreenChange = () => {
+      this.updateFullscreenButton();
+      this.resizeCanvas();
+      requestAnimationFrame(() => this.resizeCanvas());
+    };
+    document.addEventListener('fullscreenchange', onFullscreenChange);
+    document.addEventListener('webkitfullscreenchange', onFullscreenChange);
 
     this.initSounds();
     this.loadHighScores();
@@ -483,17 +541,14 @@ const Game = {
     // Floating score / combo popups (steady, above the world)
     for (const sp of this.scorePopups) this.drawScorePopup(sp);
 
-    // Shifted left of the HUD button column (x >= 742) so the two never overlap.
     ctx.fillStyle = 'rgba(255,255,255,0.7)';
     ctx.font      = 'bold 20px sans-serif';
     ctx.textAlign = 'right';
-    ctx.fillText(`Score: ${Math.round(this.displayScore)}`, CANVAS_W - 70, 32);
+    ctx.fillText(`Score: ${Math.round(this.displayScore)}`, CANVAS_W - 16, 32);
 
     if (this.gameMode === 'flash') this.drawTimerRing();
 
     if (this.gameMode === 'sniper') this.drawSniperHUD();
-
-    if (this.state === 'playing') this.drawHudButtons();
 
     if (this.state === 'complete') this.drawCompleteScreen();
   },
@@ -835,22 +890,6 @@ const Game = {
     }
 
     if (this.sniperEnding) return; // clicks are spent; let the final pop resolve
-
-    if (this.hudSoundRect) {
-      const { x, y, w, h } = this.hudSoundRect;
-      if (cx >= x && cx <= x + w && cy >= y && cy <= y + h) {
-        this.cycleSound();
-        return;
-      }
-    }
-    if (this.hudEndRect) {
-      const { x, y, w, h } = this.hudEndRect;
-      if (cx >= x && cx <= x + w && cy >= y && cy <= y + h) {
-        this.playRandomPop();
-        this.endGame();
-        return;
-      }
-    }
 
     for (let i = this.bubbles.length - 1; i >= 0; i--) {
       const b  = this.bubbles[i];
@@ -1473,6 +1512,7 @@ const Game = {
     this.canvas.style.cursor = 'default';
     this.completeOkRect    = null;
     this.completeOkHovered = false;
+    this.showExitButton(false);
   },
 
   returnToTitle() {
@@ -1480,6 +1520,7 @@ const Game = {
     this.canvas.style.cursor = 'default';
     this.hoveredButton     = null;
     this.titleAnimT        = 0; // replay the card slide-in
+    this.showExitButton(false);
     this.stopBgm();
   },
 
@@ -1527,121 +1568,109 @@ const Game = {
                     : this.soundState === 'musicoff' ? 'off'
                     :                                  'on';
     if (this.bgm) this.bgm.muted = this.soundState !== 'on';
+    this.updateSoundButton();
   },
 
   // ─── HUD buttons ─────────────────────────────────────────────────────────────
+  // These are DOM buttons in a column outside the game frame (see .hud-column in
+  // style.css), not canvas-drawn like the other three games. The reason is
+  // specific to this game: clicking bubbles IS the gameplay, so a button painted
+  // over the field would swallow shots meant for a bubble.
 
-  // Geometry, colors and icon paths below are shared verbatim across all four
-  // games in this repo (Game3/js/render.js is the reference): two 30x30 rounded
-  // squares stacked in the top-right corner, sound above power, 28px inset.
+  initHudButtons() {
+    this.soundBtn      = document.getElementById('soundBtn');
+    this.exitBtn       = document.getElementById('exitBtn');
+    this.fullscreenBtn = document.getElementById('fullscreenBtn');
 
-  drawHudButtons() {
-    const SZ = 30, MR = 28, GAP = 6, S = 8;
-    const bx = CANVAS_W - MR - SZ;
-    const y1 = 16;
-    const y2 = y1 + SZ + GAP;
-    this.hudSoundRect = { x: bx, y: y1, w: SZ, h: SZ };
-    this.hudEndRect   = { x: bx, y: y2, w: SZ, h: SZ };
-    this.drawHudButton(bx, y1, SZ, this.hudSoundHovered);
-    this.drawSoundIcon(bx + SZ / 2, y1 + SZ / 2, S);
-    this.drawHudButton(bx, y2, SZ, this.hudEndHovered);
-    this.drawEndIcon(bx + SZ / 2, y2 + SZ / 2, S);
+    // The sound toggle stays silent, as it was when canvas-drawn.
+    if (this.soundBtn) this.soundBtn.addEventListener('click', () => this.cycleSound());
+    if (this.exitBtn) {
+      this.exitBtn.innerHTML = HUD_ICONS.power;
+      this.exitBtn.addEventListener('click', () => { this.playRandomPop(); this.endGame(); });
+    }
+    if (this.fullscreenBtn) {
+      this.fullscreenBtn.addEventListener('click', () => { this.playRandomPop(); this.toggleFullscreen(); });
+    }
+
+    this.updateSoundButton();
+    this.updateFullscreenButton();
+    this.showExitButton(false);
   },
 
-  drawHudButton(x, y, sz, hovered) {
-    const { ctx } = this;
-    const r = 8;
-    const p = new Path2D();
-    p.moveTo(x + r, y);
-    p.arcTo(x + sz, y,      x + sz, y + sz, r);
-    p.arcTo(x + sz, y + sz, x,      y + sz, r);
-    p.arcTo(x,      y + sz, x,      y,      r);
-    p.arcTo(x,      y,      x + sz, y,      r);
-    p.closePath();
-    ctx.save();
-    ctx.fillStyle   = hovered ? 'rgba(255,255,255,0.09)' : 'rgba(255,255,255,0.045)';
-    ctx.fill(p);
-    ctx.strokeStyle = hovered ? 'rgba(150,180,220,0.55)' : 'rgba(150,180,220,0.30)';
-    ctx.lineWidth   = 1;
-    ctx.stroke(p);
-    ctx.restore();
+  // Exit only makes sense mid-run. It's the middle button, and because the column
+  // is a flex container, hiding it closes the gap with no repositioning.
+  showExitButton(show) {
+    if (this.exitBtn) this.exitBtn.hidden = !show;
   },
 
-  // Three states: 'on' (speaker + waves), 'musicoff' (slashed note — effects
-  // still audible), 'off' (speaker + X). s is the icon's nominal half-size.
-  drawSoundIcon(cx, cy, s) {
-    const { ctx } = this;
-    const TAU = Math.PI * 2;
-    const color = this.soundState === 'on' ? '#e6eef8' : '#8aa0bd';
-    ctx.save();
-    ctx.fillStyle   = color;
-    ctx.strokeStyle = color;
-    ctx.lineWidth   = 1.6;
-    ctx.lineCap     = 'round';
-    ctx.lineJoin    = 'round';
+  updateSoundButton() {
+    if (!this.soundBtn) return;
+    const label = this.soundState === 'on'       ? 'Sound: on'
+                : this.soundState === 'musicoff' ? 'Music off (pops still play)'
+                :                                  'Muted';
+    this.soundBtn.innerHTML = HUD_ICONS.sound[this.soundState];
+    this.soundBtn.title = label;
+    this.soundBtn.setAttribute('aria-label', label);
+    // Bright only while fully on, dim otherwise — same as the canvas games.
+    this.soundBtn.style.color = this.soundState === 'on' ? '#e6eef8' : '#8aa0bd';
+  },
 
-    if (this.soundState === 'musicoff') {
-      const nx = cx - s * 0.15;
-      ctx.beginPath();
-      ctx.ellipse(nx - s * 0.28, cy + s * 0.5, s * 0.3, s * 0.22, -0.4, 0, TAU);
-      ctx.fill();
-      ctx.beginPath();
-      ctx.moveTo(nx, cy + s * 0.5);
-      ctx.lineTo(nx, cy - s * 0.6);
-      ctx.lineTo(nx + s * 0.5, cy - s * 0.4);
-      ctx.stroke();
-      ctx.beginPath();
-      ctx.moveTo(cx - s * 0.9, cy + s * 0.9);
-      ctx.lineTo(cx + s * 0.9, cy - s * 0.9);
-      ctx.stroke();
-      ctx.restore();
+  updateFullscreenButton() {
+    if (!this.fullscreenBtn) return;
+    const on = this.isFullscreen();
+    const label = on ? 'Exit fullscreen' : 'Fullscreen';
+    this.fullscreenBtn.innerHTML = on ? HUD_ICONS.fullscreenExit : HUD_ICONS.fullscreenEnter;
+    this.fullscreenBtn.title = label;
+    this.fullscreenBtn.setAttribute('aria-label', label);
+  },
+
+  // ─── Fullscreen ──────────────────────────────────────────────────────────────
+  // Read live from the document rather than tracked in a field, so leaving
+  // fullscreen with Esc or F11 keeps the button glyph in sync for free.
+  isFullscreen() {
+    return !!(document.fullscreenElement || document.webkitFullscreenElement);
+  },
+
+  // The <html> element goes fullscreen, not the canvas or its frame: style.css
+  // sizes .game-wrapper as a 4:3 box against viewport units, so making the
+  // viewport the screen keeps that box shape and leaves the HUD column beside it.
+  // Fullscreening an inner element instead would let the UA stretch it to
+  // 100%x100% and break both the aspect ratio and the button column's placement.
+  toggleFullscreen() {
+    if (this.isFullscreen()) {
+      const exit = document.exitFullscreen || document.webkitExitFullscreen;
+      if (exit) { const p = exit.call(document); if (p && p.catch) p.catch(() => {}); }
       return;
     }
-
-    // Speaker body (used by 'on' and 'off').
-    ctx.beginPath();
-    ctx.moveTo(cx - s * 0.85, cy - s * 0.25);
-    ctx.lineTo(cx - s * 0.5,  cy - s * 0.25);
-    ctx.lineTo(cx - s * 0.05, cy - s * 0.6);
-    ctx.lineTo(cx - s * 0.05, cy + s * 0.6);
-    ctx.lineTo(cx - s * 0.5,  cy + s * 0.25);
-    ctx.lineTo(cx - s * 0.85, cy + s * 0.25);
-    ctx.closePath();
-    ctx.fill();
-
-    if (this.soundState === 'on') {
-      ctx.beginPath();
-      ctx.arc(cx - s * 0.05, cy, s * 0.55, -0.7, 0.7);
-      ctx.stroke();
-      ctx.beginPath();
-      ctx.arc(cx - s * 0.05, cy, s * 0.95, -0.7, 0.7);
-      ctx.stroke();
-    } else { // 'off' — muted X
-      ctx.beginPath();
-      ctx.moveTo(cx + s * 0.2, cy - s * 0.5);
-      ctx.lineTo(cx + s * 0.9, cy + s * 0.5);
-      ctx.moveTo(cx + s * 0.9, cy - s * 0.5);
-      ctx.lineTo(cx + s * 0.2, cy + s * 0.5);
-      ctx.stroke();
-    }
-    ctx.restore();
+    const el = document.documentElement;
+    const req = el.requestFullscreen || el.webkitRequestFullscreen;
+    // Rejects when the embedding page withholds allow="fullscreen" — ignore it
+    // rather than throwing an unhandled rejection into the console.
+    if (req) { const p = req.call(el); if (p && p.catch) p.catch(() => {}); }
   },
 
-  // Power symbol: a ring with a gap at the top and a vertical bar through it.
-  drawEndIcon(cx, cy, s) {
-    const { ctx } = this;
-    ctx.save();
-    ctx.strokeStyle = '#8aa0bd';
-    ctx.lineWidth   = 1.8;
-    ctx.lineCap     = 'round';
-    ctx.beginPath();
-    ctx.arc(cx, cy, s * 0.8, (-90 + 42) * Math.PI / 180, (-90 - 42) * Math.PI / 180 + Math.PI * 2, false);
-    ctx.stroke();
-    ctx.beginPath();
-    ctx.moveTo(cx, cy - s * 1.05);
-    ctx.lineTo(cx, cy - s * 0.05);
-    ctx.stroke();
-    ctx.restore();
+  // ─── Canvas resolution ───────────────────────────────────────────────────────
+  // The element is CSS-sized by style.css; the backing store is sized to the real
+  // device pixels it covers, so the game renders at native resolution instead of
+  // being upscaled from a fixed 800x600 bitmap. No drawing code changes: the base
+  // transform maps the 800x600 logical space onto the larger buffer.
+  //
+  // Safe because nothing in this file resets the transform (every ctx.scale and
+  // ctx.translate is inside a save/restore pair), no gradient is cached across
+  // frames, clearRect uses logical coordinates, and both pointer handlers already
+  // derive their mapping from getBoundingClientRect().
+  resizeCanvas() {
+    const rect = this.canvas.getBoundingClientRect();
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const k = Math.min(((rect.width || CANVAS_W) / CANVAS_W) * dpr, MAX_BACKING_SCALE);
+    const bw = Math.max(1, Math.round(CANVAS_W * k));
+    const bh = Math.max(1, Math.round(CANVAS_H * k));
+    if (this.canvas.width !== bw || this.canvas.height !== bh) {
+      this.canvas.width  = bw;
+      this.canvas.height = bh;
+    }
+    // Setting width/height resets the context, so (re)apply the logical scale.
+    this.ctx.setTransform(bw / CANVAS_W, 0, 0, bh / CANVAS_H, 0, 0);
   },
 
   // ─── Sound ───────────────────────────────────────────────────────────────────
@@ -2143,6 +2172,7 @@ const Game = {
     this.state       = 'playing';
     this.cardAnimT   = 0;
     this.canvas.style.cursor = 'none'; // custom reticle is drawn instead
+    this.showExitButton(true);
     for (let i = 0; i < SPAWN_INITIAL; i++) this.spawnBubble('blue');
     this.startBgm();
   },
@@ -2175,11 +2205,10 @@ const Game = {
       return;
     }
 
+    // Nothing clickable is drawn over the field any more — the HUD buttons live
+    // outside the frame — so the custom reticle owns the cursor throughout play.
     if (this.state === 'playing') {
-      const inRect = (r) => r && cx >= r.x && cx <= r.x + r.w && cy >= r.y && cy <= r.y + r.h;
-      this.hudSoundHovered = inRect(this.hudSoundRect);
-      this.hudEndHovered   = inRect(this.hudEndRect);
-      this.canvas.style.cursor = (this.hudSoundHovered || this.hudEndHovered) ? 'pointer' : 'none';
+      if (this.canvas.style.cursor !== 'none') this.canvas.style.cursor = 'none';
       return;
     }
 
