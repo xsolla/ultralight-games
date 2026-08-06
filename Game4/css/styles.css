@@ -24,3 +24,15 @@ html, body {
   user-select: none;
   touch-action: none;
 }
+
+/* Fullscreen (the HUD toggle fullscreens <html>, see Game.toggleFullscreen).
+   Same centered 4:3 box, just uncapped so it fills the screen — the viewport
+   units above already do the fitting, and #game-wrap's flex centering
+   letterboxes it on non-4:3 displays. Drop the framing that only makes sense
+   for a windowed canvas. */
+html:fullscreen #game-canvas {
+  max-width: none;
+  max-height: none;
+  border-radius: 0;
+  box-shadow: none;
+}

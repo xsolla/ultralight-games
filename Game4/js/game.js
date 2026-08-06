@@ -51,6 +51,16 @@ const Game = {
 
     this.resizeCanvas();
     window.addEventListener('resize', () => this.resizeCanvas());
+    // Entering/leaving fullscreen changes the viewport, so the 4:3 canvas box
+    // changes size and the backing store has to be rebuilt for it. The event can
+    // fire before layout has settled on the new box, so re-measure next frame
+    // too — otherwise exiting leaves the backing store at its fullscreen size.
+    const onFullscreenChange = () => {
+      this.resizeCanvas();
+      requestAnimationFrame(() => this.resizeCanvas());
+    };
+    document.addEventListener('fullscreenchange', onFullscreenChange);
+    document.addEventListener('webkitfullscreenchange', onFullscreenChange);
     window.addEventListener('keydown', (e) => this.handleKeyDown(e));
 
     this.canvas.addEventListener('mousedown', (e) => this.handleMouseDown(e));
@@ -379,6 +389,9 @@ const Game = {
   // header strip is only TOP_MARGIN (64px) tall, so a second 30px row at y=52
   // would spill onto the well — in Multiplayer directly over P2's top-right
   // cells, whose right edge reaches x~770.
+  // The row grows leftward from the right margin: fullscreen, audio, exit.
+  // It stays a single row (rather than the vertical column the other games use)
+  // because this header strip is only TOP_MARGIN (64px) tall — see below.
   _hudLayout: null,
   getHudLayout() {
     if (this._hudLayout) return this._hudLayout;
@@ -386,7 +399,9 @@ const Game = {
     const y = 16;
     const exitX = CANVAS_W - margin - btnSize;
     const audioX = exitX - gap - btnSize;
+    const fullX = audioX - gap - btnSize;
     this._hudLayout = {
+      fullscreenBtn: { rect: { x: fullX, y, w: btnSize, h: btnSize } },
       audioBtn: { rect: { x: audioX, y, w: btnSize, h: btnSize } },
       exitBtn: { rect: { x: exitX, y, w: btnSize, h: btnSize } },
     };
@@ -397,6 +412,11 @@ const Game = {
     const hud = this.getHudLayout();
     if (this.hitTest(x, y, hud.audioBtn.rect)) { this.cycleAudioMode(); return true; }
     if (this.hitTest(x, y, hud.exitBtn.rect)) { this.goToMenu(); return true; }
+    if (this.hitTest(x, y, hud.fullscreenBtn.rect)) {
+      Sound.play('ui_click');
+      this.toggleFullscreen();
+      return true;
+    }
     return false;
   },
 
@@ -405,7 +425,32 @@ const Game = {
     const hud = this.getHudLayout();
     if (this.hitTest(x, y, hud.audioBtn.rect)) return 'audio';
     if (this.hitTest(x, y, hud.exitBtn.rect)) return 'exit';
+    if (this.hitTest(x, y, hud.fullscreenBtn.rect)) return 'fullscreen';
     return null;
+  },
+
+  // Read live from the document rather than tracked in a field, so leaving
+  // fullscreen with Esc or F11 keeps the button glyph in sync for free.
+  isFullscreen() {
+    return !!(document.fullscreenElement || document.webkitFullscreenElement);
+  },
+
+  // The <html> element goes fullscreen, not the canvas: styles.css sizes the
+  // canvas as a centered 4:3 box against the viewport, so making the viewport
+  // the screen keeps that box (and therefore resizeCanvas/eventToCanvas) exactly
+  // as it is. Fullscreening the canvas itself would let the UA stretch it to
+  // 100%x100% and break the logical-coordinate mapping.
+  toggleFullscreen() {
+    if (this.isFullscreen()) {
+      const exit = document.exitFullscreen || document.webkitExitFullscreen;
+      if (exit) { const p = exit.call(document); if (p && p.catch) p.catch(() => {}); }
+      return;
+    }
+    const el = document.documentElement;
+    const req = el.requestFullscreen || el.webkitRequestFullscreen;
+    // Rejects when the embedding page withholds allow="fullscreen" — ignore it
+    // rather than throwing an unhandled rejection into the console.
+    if (req) { const p = req.call(el); if (p && p.catch) p.catch(() => {}); }
   },
 
   cycleAudioMode() {
@@ -786,7 +831,7 @@ const Game = {
       });
     }
 
-    Renderer.drawHudButtons(ctx, this.getHudLayout(), Sound.mode, this.hudHover);
+    Renderer.drawHudButtons(ctx, this.getHudLayout(), Sound.mode, this.hudHover, this.isFullscreen());
   },
 
   renderMultiplayer(ctx) {
@@ -805,6 +850,6 @@ const Game = {
       Renderer.drawWinDialog(ctx, this.getWinDialogLayout(), label);
     }
 
-    Renderer.drawHudButtons(ctx, this.getHudLayout(), Sound.mode, this.hudHover);
+    Renderer.drawHudButtons(ctx, this.getHudLayout(), Sound.mode, this.hudHover, this.isFullscreen());
   },
 };

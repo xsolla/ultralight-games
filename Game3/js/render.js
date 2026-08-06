@@ -365,16 +365,22 @@ function drawHeader(ctx, game) {
   drawScorePill(ctx, CANVAS_W - LAYOUT.MARGIN - 146, 20, COLORS.bubbleCore, counts.bubbles);
   drawScorePill(ctx, CANVAS_W - LAYOUT.MARGIN - 250, 20, COLORS.crystalCore, counts.crystals);
 
-  // HUD icon buttons, top-right corner: sound (3-state) above power (to menu).
+  // HUD icon buttons, top-right corner: sound (3-state), then power (to menu),
+  // then fullscreen. The column ends at y=118, clear of the board — which never
+  // reaches past x~650 at any board size (see computeLayout in board.js).
   const bx = CANVAS_W - LAYOUT.MARGIN - 30;
   const soundRect = { x: bx, y: 16, w: 30, h: 30 };
   const powerRect = { x: bx, y: 52, w: 30, h: 30 };
+  const fullRect  = { x: bx, y: 88, w: 30, h: 30 };
   game.soundBtnRect = soundRect;
   game.powerBtnRect = powerRect;
+  game.fullscreenBtnRect = fullRect;
   drawHudButton(ctx, soundRect, game.hudHover === 'sound');
   drawSoundIcon(ctx, soundRect.x + 15, soundRect.y + 15, 8, game.soundState);
   drawHudButton(ctx, powerRect, game.hudHover === 'power');
   drawPowerIcon(ctx, powerRect.x + 15, powerRect.y + 15, 8);
+  drawHudButton(ctx, fullRect, game.hudHover === 'fullscreen');
+  drawFullscreenIcon(ctx, fullRect.x + 15, fullRect.y + 15, 8, game.isFullscreen());
 
   ctx.textAlign = 'left';
   ctx.textBaseline = 'top';
@@ -402,6 +408,35 @@ function drawPowerIcon(ctx, cx, cy, s) {
   ctx.beginPath();
   ctx.moveTo(cx, cy - s * 1.05);
   ctx.lineTo(cx, cy - s * 0.05);
+  ctx.stroke();
+  ctx.restore();
+}
+
+// Fullscreen toggle: four corner brackets. Corners on the outside with arms
+// reaching in = "enter fullscreen"; corners inset with arms reaching out to the
+// edges = "exit". Same stroke weight and color as the power icon, and the same
+// s*0.8 extent, so all three HUD glyphs read at one visual weight.
+function drawFullscreenIcon(ctx, cx, cy, s, active) {
+  const a = s * 0.8;   // distance from center to the outer edge of a bracket
+  const b = s * 0.42;  // arm length
+  ctx.save();
+  ctx.strokeStyle = COLORS.headerSub;
+  ctx.lineWidth = 1.8;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  ctx.beginPath();
+  // One L-shaped bracket per quadrant; the sign pair mirrors it into each corner.
+  for (const [sx, sy] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) {
+    if (active) {
+      ctx.moveTo(cx + sx * a, cy + sy * (a - b));
+      ctx.lineTo(cx + sx * (a - b), cy + sy * (a - b));
+      ctx.lineTo(cx + sx * (a - b), cy + sy * a);
+    } else {
+      ctx.moveTo(cx + sx * (a - b), cy + sy * a);
+      ctx.lineTo(cx + sx * a, cy + sy * a);
+      ctx.lineTo(cx + sx * a, cy + sy * (a - b));
+    }
+  }
   ctx.stroke();
   ctx.restore();
 }

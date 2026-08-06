@@ -393,7 +393,38 @@ const Renderer = {
     ctx.restore();
   },
 
-  drawHudButtons(ctx, hud, audioMode, hudHover) {
+  // Fullscreen toggle: four corner brackets. Corners on the outside with arms
+  // reaching in = "enter fullscreen"; corners inset with arms reaching out to
+  // the edges = "exit". Same stroke weight, color and s*0.8 extent as the exit
+  // icon, so all three HUD glyphs read at one visual weight.
+  drawFullscreenIcon(ctx, cx, cy, s, active) {
+    const a = s * 0.8;   // distance from center to the outer edge of a bracket
+    const b = s * 0.42;  // arm length
+    ctx.save();
+    ctx.strokeStyle = '#8aa0bd';
+    ctx.lineWidth = 1.8;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.beginPath();
+    // One L-shaped bracket per quadrant; the sign pair mirrors it into each corner.
+    for (const [sx, sy] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) {
+      if (active) {
+        ctx.moveTo(cx + sx * a, cy + sy * (a - b));
+        ctx.lineTo(cx + sx * (a - b), cy + sy * (a - b));
+        ctx.lineTo(cx + sx * (a - b), cy + sy * a);
+      } else {
+        ctx.moveTo(cx + sx * (a - b), cy + sy * a);
+        ctx.lineTo(cx + sx * a, cy + sy * a);
+        ctx.lineTo(cx + sx * a, cy + sy * (a - b));
+      }
+    }
+    ctx.stroke();
+    ctx.restore();
+  },
+
+  drawHudButtons(ctx, hud, audioMode, hudHover, fullscreen) {
+    this.drawHudIconButton(ctx, hud.fullscreenBtn.rect, hudHover === 'fullscreen',
+      (c, x, y, s) => this.drawFullscreenIcon(c, x, y, s, fullscreen));
     this.drawHudIconButton(ctx, hud.audioBtn.rect, hudHover === 'audio',
       (c, x, y, s) => this.drawSpeakerIcon(c, x, y, s, audioMode));
     this.drawHudIconButton(ctx, hud.exitBtn.rect, hudHover === 'exit',

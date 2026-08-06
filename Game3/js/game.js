@@ -23,7 +23,8 @@ const Game = {
   menuButtons: [],          // populated by drawMenu each frame, for hit-testing
   powerBtnRect: null,       // in-game power button (return to menu) rect
   soundBtnRect: null,       // in-game sound button rect
-  hudHover: null,           // 'sound' | 'power' | null — which HUD button is hovered
+  fullscreenBtnRect: null,  // in-game fullscreen toggle rect
+  hudHover: null,           // 'sound' | 'power' | 'fullscreen' | null (hovered button)
   soundState: 'on',         // 'on' | 'musicoff' | 'off' (cosmetic for now)
 
   // Turn / interaction state.
@@ -52,6 +53,16 @@ const Game = {
     // all drawing stays in the fixed 800x600 logical space via a context scale.
     this.resizeCanvas();
     window.addEventListener('resize', () => this.resizeCanvas());
+    // Entering/leaving fullscreen changes the viewport, so the 4:3 canvas box
+    // changes size and the backing store has to be rebuilt for it. The event can
+    // fire before layout has settled on the new box, so re-measure next frame
+    // too — otherwise exiting leaves the backing store at its fullscreen size.
+    const onFullscreenChange = () => {
+      this.resizeCanvas();
+      requestAnimationFrame(() => this.resizeCanvas());
+    };
+    document.addEventListener('fullscreenchange', onFullscreenChange);
+    document.addEventListener('webkitfullscreenchange', onFullscreenChange);
 
     this.canvas.addEventListener('pointerdown', (e) => this.onPointerDown(e));
     this.canvas.addEventListener('pointermove', (e) => this.onPointerMove(e));
@@ -257,7 +268,33 @@ const Game = {
     const inRect = (r) => r && p.x >= r.x && p.x <= r.x + r.w && p.y >= r.y && p.y <= r.y + r.h;
     if (inRect(this.soundBtnRect)) return 'sound';
     if (inRect(this.powerBtnRect)) return 'power';
+    if (inRect(this.fullscreenBtnRect)) return 'fullscreen';
     return null;
+  },
+
+  // ---- Fullscreen --------------------------------------------------------
+  // Read live from the document rather than tracked in a field, so leaving
+  // fullscreen with Esc or F11 keeps the button glyph in sync for free.
+  isFullscreen() {
+    return !!(document.fullscreenElement || document.webkitFullscreenElement);
+  },
+
+  // The <html> element goes fullscreen, not the canvas: styles.css sizes the
+  // canvas as a centered 4:3 box against the viewport, so making the viewport
+  // the screen keeps that box (and therefore resizeCanvas/eventToCanvas) exactly
+  // as it is. Fullscreening the canvas itself would let the UA stretch it to
+  // 100%x100% and break the logical-coordinate mapping.
+  toggleFullscreen() {
+    if (this.isFullscreen()) {
+      const exit = document.exitFullscreen || document.webkitExitFullscreen;
+      if (exit) { const p = exit.call(document); if (p && p.catch) p.catch(() => {}); }
+      return;
+    }
+    const el = document.documentElement;
+    const req = el.requestFullscreen || el.webkitRequestFullscreen;
+    // Rejects when the embedding page withholds allow="fullscreen" — ignore it
+    // rather than throwing an unhandled rejection into the console.
+    if (req) { const p = req.call(el); if (p && p.catch) p.catch(() => {}); }
   },
 
   onMenuClick(p) {
@@ -279,6 +316,7 @@ const Game = {
     const hud = this.hudButtonAt(p);
     if (hud === 'sound') { this.cycleSound(); return; }
     if (hud === 'power') { Sound.play('ui_click'); this.returnToMenu(); return; }
+    if (hud === 'fullscreen') { Sound.play('ui_click'); this.toggleFullscreen(); return; }
 
     // Block board input while a conversion is resolving (turn hasn't advanced yet).
     if (this.busy) return;

@@ -27,3 +27,12 @@ body {
   max-height: 900px;
   display: block;
 }
+
+/* Fullscreen (the HUD toggle fullscreens <html>, see Game.toggleFullscreen).
+   Same centered 4:3 box, just uncapped so it fills the screen — the viewport
+   units above already do the fitting, and body's flex centering letterboxes it
+   on non-4:3 displays. */
+html:fullscreen #game {
+  width: min(100vw, 133.3333vh);
+  max-height: none;
+}
