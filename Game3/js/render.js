@@ -341,7 +341,7 @@ function drawHeader(ctx, game) {
   ctx.fillStyle = COLORS.headerText;
   ctx.font = '600 22px system-ui, sans-serif';
   ctx.textAlign = 'left';
-  ctx.fillText('Xsolla Hexxagon', LAYOUT.MARGIN, 18);
+  ctx.fillText('Hexxagon', LAYOUT.MARGIN, 18);
 
   ctx.fillStyle = COLORS.headerSub;
   ctx.font = '13px system-ui, sans-serif';
@@ -371,9 +371,9 @@ function drawHeader(ctx, game) {
   const powerRect = { x: bx, y: 52, w: 30, h: 30 };
   game.soundBtnRect = soundRect;
   game.powerBtnRect = powerRect;
-  drawHudButton(ctx, soundRect);
+  drawHudButton(ctx, soundRect, game.hudHover === 'sound');
   drawSoundIcon(ctx, soundRect.x + 15, soundRect.y + 15, 8, game.soundState);
-  drawHudButton(ctx, powerRect);
+  drawHudButton(ctx, powerRect, game.hudHover === 'power');
   drawPowerIcon(ctx, powerRect.x + 15, powerRect.y + 15, 8);
 
   ctx.textAlign = 'left';
@@ -381,11 +381,11 @@ function drawHeader(ctx, game) {
 }
 
 // Rounded-square HUD button background.
-function drawHudButton(ctx, r) {
+function drawHudButton(ctx, r, hovered) {
   roundRect(ctx, r.x, r.y, r.w, r.h, 8);
-  ctx.fillStyle = COLORS.btnFill;
+  ctx.fillStyle = hovered ? COLORS.btnHoverFill : COLORS.btnFill;
   ctx.fill();
-  ctx.strokeStyle = COLORS.btnStroke;
+  ctx.strokeStyle = hovered ? COLORS.btnHoverStroke : COLORS.btnStroke;
   ctx.lineWidth = 1;
   ctx.stroke();
 }
@@ -462,6 +462,39 @@ function drawSoundIcon(ctx, cx, cy, s, state) {
     ctx.lineTo(cx + s * 0.2, cy + s * 0.5);
     ctx.stroke();
   }
+  ctx.restore();
+}
+
+// ---------------------------------------------------------------------------
+// Xsolla wordmark
+// ---------------------------------------------------------------------------
+// Traced verbatim from common_assets/xsolla_logo/new-logo-dark.svg (viewBox
+// 0 0 171 46). Kept as path data rather than an <img>/asset file so the game
+// folder stays self-contained and there is no async load to wait on. The
+// artwork occupies x 0..169.997, y 4.53857..41.46 of the source viewBox.
+const XSOLLA_LOGO_PATHS = [
+  'M73.6664 4.53827C84.0077 4.53827 92.1272 12.6598 92.1272 22.9991C92.1272 33.3383 84.0077 41.4599 73.6664 41.4599C63.3271 41.4599 55.2078 33.3383 55.2078 22.9991C55.2078 12.6598 63.3272 4.53829 73.6664 4.53827ZM73.6664 11.6001C67.4629 11.6001 62.7728 16.4937 62.7728 22.9991C62.7728 29.5065 67.4629 34.398 73.6664 34.398C79.872 34.398 84.5622 29.5065 84.5622 22.9991C84.5622 16.4937 79.872 11.6001 73.6664 11.6001Z',
+  'M18.0542 16.6417L26.3277 5.34541H35.0034L22.2521 22.2765L36.0119 40.6531H26.884L17.7546 28.3332L8.725 40.6531H0.00012207L13.5575 22.6895L0.605567 5.34541H9.68396L18.0542 16.6417Z',
+  'M42.9917 15.4836L49.9509 24.2107C51.4643 26.1266 52.1706 27.9419 52.1706 29.9091C52.1706 31.8763 51.4643 33.6917 49.9509 35.6097L45.9669 40.6531H36.9893L45.1088 30.2622L38.1987 21.5865C36.7367 19.7712 36.0304 18.005 36.0304 16.1404C36.0304 14.2225 36.7367 12.4584 38.1987 10.6925L42.7391 5.34541H51.5156L42.9917 15.4836Z',
+  'M118.379 40.6531H109.502L90.5358 5.34541H99.4151L118.379 40.6531Z',
+  'M116.976 5.34541L131.944 33.2089L146.393 5.34541H151.688L169.997 40.6531H127.065L108.101 5.34541H116.976ZM139.348 34.0962H158.385L148.875 15.1397L139.348 34.0962Z',
+];
+const XSOLLA_LOGO_W = 169.997;   // artwork width in source units
+const XSOLLA_LOGO_Y0 = 4.53857;  // artwork's top edge in source units
+const XSOLLA_LOGO_FILL = '#80EAFF';
+let xsollaLogoCache = null;      // Path2D objects, built once on first draw
+
+// (x, y) is the top-left of the visible artwork; w is its width in logical px.
+// Every path is filled 'evenodd' — required by the two glyphs with holes (the
+// O and the A) and identical to nonzero for the other three.
+function drawXsollaLogo(ctx, x, y, w) {
+  if (!xsollaLogoCache) xsollaLogoCache = XSOLLA_LOGO_PATHS.map((d) => new Path2D(d));
+  const s = w / XSOLLA_LOGO_W;
+  ctx.save();
+  ctx.translate(x, y - XSOLLA_LOGO_Y0 * s);
+  ctx.scale(s, s);
+  ctx.fillStyle = XSOLLA_LOGO_FILL;
+  for (const p of xsollaLogoCache) ctx.fill(p, 'evenodd');
   ctx.restore();
 }
 

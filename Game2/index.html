@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Xsolla Crowd Run</title>
+  <title>Crowd Run</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     html, body {
@@ -177,48 +177,50 @@
     }
     #playBtn:hover { background: #a4e6f6; }
 
-    #soundBtn {
+    /* HUD icon buttons. Geometry and colors mirror the other three games in
+       this repo (Game3/js/render.js is the reference): 30x30, radius 8, stacked
+       vertically 28px in from the right edge, sound above exit with a 6px gap.
+       #game-root is exactly 800x600 and scale.js scales the whole subtree, so
+       these px offsets land on the same logical coordinates as canvas pixels. */
+    #soundBtn, #exitBtn {
       position: absolute;
-      top: 12px;
-      right: 12px;
-      width: 44px;
-      height: 44px;
+      right: 28px;
+      width: 30px;
+      height: 30px;
       display: flex;
       align-items: center;
       justify-content: center;
       padding: 0;
-      color: #7ed8f0;
-      background: rgba(8, 8, 15, 0.5);
-      border: 1px solid #2a2a44;
-      border-radius: 10px;
+      background: rgba(255, 255, 255, 0.045);
+      border: 1px solid rgba(150, 180, 220, 0.30);
+      border-radius: 8px;
       cursor: pointer;
       z-index: 30;
       transition: background 120ms ease, border-color 120ms ease;
     }
-    #soundBtn:hover { background: rgba(126, 216, 240, 0.14); border-color: #7ed8f0; }
-    #soundBtn svg  { width: 24px; height: 24px; display: block; }
+    #soundBtn { top: 16px; }
+    #exitBtn  { top: 52px; color: #8aa0bd; }
+    /* Must stay — display:flex above would otherwise defeat the hidden attr. */
+    #exitBtn[hidden] { display: none; }
+    #soundBtn:hover, #exitBtn:hover {
+      background: rgba(255, 255, 255, 0.09);
+      border-color: rgba(150, 180, 220, 0.55);
+    }
+    /* 30-unit viewBox at 30px, so 1 SVG unit = 1 logical px and the icon paths
+       are the reference's own numbers. Overflows the 28px content box by 1px a
+       side, which centers the artwork on the border box exactly as on canvas. */
+    #soundBtn svg, #exitBtn svg { width: 30px; height: 30px; flex: none; display: block; }
 
-    #exitBtn {
+    /* Xsolla wordmark, top-left of the title screen. Mirrors the HUD button
+       column on the right: same 28px inset, same y. */
+    #titleLogo {
       position: absolute;
-      top: 12px;
-      right: 64px;
-      width: 44px;
-      height: 44px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      padding: 0;
-      color: #f87171;
-      background: rgba(8, 8, 15, 0.5);
-      border: 1px solid #2a2a44;
-      border-radius: 10px;
-      cursor: pointer;
-      z-index: 30;
-      transition: background 120ms ease, border-color 120ms ease;
+      left: 28px;
+      top: 16px;
+      width: 112px;
+      z-index: 20;
     }
-    #exitBtn[hidden]  { display: none; }
-    #exitBtn:hover    { background: rgba(248, 113, 113, 0.16); border-color: #f87171; }
-    #exitBtn svg      { width: 24px; height: 24px; display: block; }
+    #titleLogo svg { width: 100%; height: auto; display: block; }
   </style>
 </head>
 <body>
@@ -237,8 +239,9 @@
   </div>
 
   <div id="titleScreen" class="modal-overlay title-overlay">
+    <div id="titleLogo"></div>
     <div class="title-box">
-      <h1>Xsolla Crowd Run</h1>
+      <h1>Crowd Run</h1>
       <p class="title-hint">Steer your crowd through the good gates!</p>
       <ol id="titleScores"></ol>
       <button id="playBtn">&#x25B6; Play</button>

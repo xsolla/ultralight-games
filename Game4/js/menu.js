@@ -160,10 +160,14 @@ const Menu = {
     Renderer.drawBackground(ctx);
     Ambiance.draw(ctx, timeMs);
 
+    // Xsolla wordmark, top-left. Mirrors the HUD button column on the right,
+    // which sits at the same 28px inset and the same y.
+    Renderer.drawXsollaLogo(ctx, 28, 16, 112);
+
     ctx.textAlign = 'center';
     ctx.fillStyle = '#f5f7fb';
     ctx.font = 'bold 40px system-ui, sans-serif';
-    ctx.fillText('XSOLLA CASCADIA', CANVAS_W / 2, 60);
+    ctx.fillText('CASCADIA', CANVAS_W / 2, 60);
 
     this.drawSectionLabel(ctx, 'MODE', 98);
     layout.modeButtons.forEach((b) => this.drawFlatButton(ctx, b, b.value === this.selectedMode));

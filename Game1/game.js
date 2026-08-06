@@ -86,6 +86,37 @@ const COMPLETE_MESSAGES = {
   zen:    "Ensless popping requres inner strength from a samurai!",
 };
 
+// ─── Xsolla wordmark ──────────────────────────────────────────────────────────
+// Traced verbatim from common_assets/xsolla_logo/new-logo-dark.svg (viewBox
+// 0 0 171 46). Kept as path data rather than an <img>/asset file so the game
+// folder stays self-contained and there is no async load to wait on. The
+// artwork occupies x 0..169.997, y 4.53857..41.46 of the source viewBox.
+const XSOLLA_LOGO_PATHS = [
+  'M73.6664 4.53827C84.0077 4.53827 92.1272 12.6598 92.1272 22.9991C92.1272 33.3383 84.0077 41.4599 73.6664 41.4599C63.3271 41.4599 55.2078 33.3383 55.2078 22.9991C55.2078 12.6598 63.3272 4.53829 73.6664 4.53827ZM73.6664 11.6001C67.4629 11.6001 62.7728 16.4937 62.7728 22.9991C62.7728 29.5065 67.4629 34.398 73.6664 34.398C79.872 34.398 84.5622 29.5065 84.5622 22.9991C84.5622 16.4937 79.872 11.6001 73.6664 11.6001Z',
+  'M18.0542 16.6417L26.3277 5.34541H35.0034L22.2521 22.2765L36.0119 40.6531H26.884L17.7546 28.3332L8.725 40.6531H0.00012207L13.5575 22.6895L0.605567 5.34541H9.68396L18.0542 16.6417Z',
+  'M42.9917 15.4836L49.9509 24.2107C51.4643 26.1266 52.1706 27.9419 52.1706 29.9091C52.1706 31.8763 51.4643 33.6917 49.9509 35.6097L45.9669 40.6531H36.9893L45.1088 30.2622L38.1987 21.5865C36.7367 19.7712 36.0304 18.005 36.0304 16.1404C36.0304 14.2225 36.7367 12.4584 38.1987 10.6925L42.7391 5.34541H51.5156L42.9917 15.4836Z',
+  'M118.379 40.6531H109.502L90.5358 5.34541H99.4151L118.379 40.6531Z',
+  'M116.976 5.34541L131.944 33.2089L146.393 5.34541H151.688L169.997 40.6531H127.065L108.101 5.34541H116.976ZM139.348 34.0962H158.385L148.875 15.1397L139.348 34.0962Z',
+];
+const XSOLLA_LOGO_W    = 169.997;   // artwork width in source units
+const XSOLLA_LOGO_Y0   = 4.53857;   // artwork's top edge in source units
+const XSOLLA_LOGO_FILL = '#80EAFF';
+let xsollaLogoCache = null;         // Path2D objects, built once on first draw
+
+// (x, y) is the top-left of the visible artwork; w is its width in logical px.
+// Every path is filled 'evenodd' — required by the two glyphs with holes (the
+// O and the A) and identical to nonzero for the other three.
+function drawXsollaLogo(ctx, x, y, w) {
+  if (!xsollaLogoCache) xsollaLogoCache = XSOLLA_LOGO_PATHS.map(d => new Path2D(d));
+  const s = w / XSOLLA_LOGO_W;
+  ctx.save();
+  ctx.translate(x, y - XSOLLA_LOGO_Y0 * s);
+  ctx.scale(s, s);
+  ctx.fillStyle = XSOLLA_LOGO_FILL;
+  for (const p of xsollaLogoCache) ctx.fill(p, 'evenodd');
+  ctx.restore();
+}
+
 // ─── Main Game object ─────────────────────────────────────────────────────────
 const Game = {
   canvas: null,
@@ -99,7 +130,7 @@ const Game = {
   newRecord: null,      // { mode, rank } set by checkAndSaveScore after a game ends
   recordsOkRect: null,
   recordsOkHovered: false,
-  soundEnabled: true,
+  soundState: 'on',     // 'on' | 'musicoff' (sfx only) | 'off'
   hudSoundRect: null,
   hudEndRect: null,
   hudSoundHovered: false,
@@ -452,10 +483,11 @@ const Game = {
     // Floating score / combo popups (steady, above the world)
     for (const sp of this.scorePopups) this.drawScorePopup(sp);
 
+    // Shifted left of the HUD button column (x >= 742) so the two never overlap.
     ctx.fillStyle = 'rgba(255,255,255,0.7)';
     ctx.font      = 'bold 20px sans-serif';
     ctx.textAlign = 'right';
-    ctx.fillText(`Score: ${Math.round(this.displayScore)}`, CANVAS_W - 16, 32);
+    ctx.fillText(`Score: ${Math.round(this.displayScore)}`, CANVAS_W - 70, 32);
 
     if (this.gameMode === 'flash') this.drawTimerRing();
 
@@ -807,8 +839,7 @@ const Game = {
     if (this.hudSoundRect) {
       const { x, y, w, h } = this.hudSoundRect;
       if (cx >= x && cx <= x + w && cy >= y && cy <= y + h) {
-        this.soundEnabled = !this.soundEnabled;
-        if (this.bgm) this.bgm.muted = !this.soundEnabled;
+        this.cycleSound();
         return;
       }
     }
@@ -1468,7 +1499,7 @@ const Game = {
       this.bgm.loop = true;
     }
     this.bgmFading       = false;
-    this.bgm.muted       = !this.soundEnabled;
+    this.bgm.muted       = this.soundState !== 'on';
     this.bgm.volume      = 0.45;
     this.bgm.currentTime = 0;
     this.bgm.play().catch(() => {});
@@ -1490,24 +1521,36 @@ const Game = {
     }
   },
 
+  // Cycle the HUD sound button: on -> music off (pops still audible) -> off.
+  cycleSound() {
+    this.soundState = this.soundState === 'on'       ? 'musicoff'
+                    : this.soundState === 'musicoff' ? 'off'
+                    :                                  'on';
+    if (this.bgm) this.bgm.muted = this.soundState !== 'on';
+  },
+
   // ─── HUD buttons ─────────────────────────────────────────────────────────────
 
+  // Geometry, colors and icon paths below are shared verbatim across all four
+  // games in this repo (Game3/js/render.js is the reference): two 30x30 rounded
+  // squares stacked in the top-right corner, sound above power, 28px inset.
+
   drawHudButtons() {
-    const SZ = 34, MR = 10, GAP = 6;
+    const SZ = 30, MR = 28, GAP = 6, S = 8;
     const bx = CANVAS_W - MR - SZ;
-    const y1 = 46;
+    const y1 = 16;
     const y2 = y1 + SZ + GAP;
     this.hudSoundRect = { x: bx, y: y1, w: SZ, h: SZ };
     this.hudEndRect   = { x: bx, y: y2, w: SZ, h: SZ };
     this.drawHudButton(bx, y1, SZ, this.hudSoundHovered);
-    this.drawSoundIcon(bx + SZ / 2, y1 + SZ / 2, SZ * 0.36);
+    this.drawSoundIcon(bx + SZ / 2, y1 + SZ / 2, S);
     this.drawHudButton(bx, y2, SZ, this.hudEndHovered);
-    this.drawEndIcon(bx + SZ / 2, y2 + SZ / 2, SZ * 0.36);
+    this.drawEndIcon(bx + SZ / 2, y2 + SZ / 2, S);
   },
 
   drawHudButton(x, y, sz, hovered) {
     const { ctx } = this;
-    const r = 7;
+    const r = 8;
     const p = new Path2D();
     p.moveTo(x + r, y);
     p.arcTo(x + sz, y,      x + sz, y + sz, r);
@@ -1516,64 +1559,87 @@ const Game = {
     p.arcTo(x,      y,      x + sz, y,      r);
     p.closePath();
     ctx.save();
-    ctx.fillStyle   = hovered ? 'rgba(255,255,255,0.18)' : 'rgba(0,0,0,0.38)';
+    ctx.fillStyle   = hovered ? 'rgba(255,255,255,0.09)' : 'rgba(255,255,255,0.045)';
     ctx.fill(p);
-    ctx.strokeStyle = hovered ? 'rgba(255,255,255,0.45)' : 'rgba(255,255,255,0.18)';
-    ctx.lineWidth   = 1.2;
+    ctx.strokeStyle = hovered ? 'rgba(150,180,220,0.55)' : 'rgba(150,180,220,0.30)';
+    ctx.lineWidth   = 1;
     ctx.stroke(p);
     ctx.restore();
   },
 
-  drawSoundIcon(cx, cy, r) {
+  // Three states: 'on' (speaker + waves), 'musicoff' (slashed note — effects
+  // still audible), 'off' (speaker + X). s is the icon's nominal half-size.
+  drawSoundIcon(cx, cy, s) {
     const { ctx } = this;
+    const TAU = Math.PI * 2;
+    const color = this.soundState === 'on' ? '#e6eef8' : '#8aa0bd';
     ctx.save();
-    const color = this.soundEnabled ? 'rgba(255,255,255,0.88)' : 'rgba(255,90,70,0.88)';
     ctx.fillStyle   = color;
     ctx.strokeStyle = color;
-    ctx.lineWidth   = 1.8;
+    ctx.lineWidth   = 1.6;
     ctx.lineCap     = 'round';
     ctx.lineJoin    = 'round';
+
+    if (this.soundState === 'musicoff') {
+      const nx = cx - s * 0.15;
+      ctx.beginPath();
+      ctx.ellipse(nx - s * 0.28, cy + s * 0.5, s * 0.3, s * 0.22, -0.4, 0, TAU);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.moveTo(nx, cy + s * 0.5);
+      ctx.lineTo(nx, cy - s * 0.6);
+      ctx.lineTo(nx + s * 0.5, cy - s * 0.4);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(cx - s * 0.9, cy + s * 0.9);
+      ctx.lineTo(cx + s * 0.9, cy - s * 0.9);
+      ctx.stroke();
+      ctx.restore();
+      return;
+    }
+
+    // Speaker body (used by 'on' and 'off').
     ctx.beginPath();
-    ctx.moveTo(cx - r*0.70, cy - r*0.35);
-    ctx.lineTo(cx - r*0.25, cy - r*0.35);
-    ctx.lineTo(cx + r*0.20, cy - r*0.72);
-    ctx.lineTo(cx + r*0.20, cy + r*0.72);
-    ctx.lineTo(cx - r*0.25, cy + r*0.35);
-    ctx.lineTo(cx - r*0.70, cy + r*0.35);
+    ctx.moveTo(cx - s * 0.85, cy - s * 0.25);
+    ctx.lineTo(cx - s * 0.5,  cy - s * 0.25);
+    ctx.lineTo(cx - s * 0.05, cy - s * 0.6);
+    ctx.lineTo(cx - s * 0.05, cy + s * 0.6);
+    ctx.lineTo(cx - s * 0.5,  cy + s * 0.25);
+    ctx.lineTo(cx - s * 0.85, cy + s * 0.25);
     ctx.closePath();
     ctx.fill();
-    if (this.soundEnabled) {
+
+    if (this.soundState === 'on') {
       ctx.beginPath();
-      ctx.arc(cx + r*0.2, cy, r*0.52, -Math.PI*0.42, Math.PI*0.42);
+      ctx.arc(cx - s * 0.05, cy, s * 0.55, -0.7, 0.7);
       ctx.stroke();
       ctx.beginPath();
-      ctx.arc(cx + r*0.2, cy, r*0.85, -Math.PI*0.38, Math.PI*0.38);
+      ctx.arc(cx - s * 0.05, cy, s * 0.95, -0.7, 0.7);
       ctx.stroke();
-    } else {
-      ctx.strokeStyle = 'rgba(255,90,70,0.88)';
-      ctx.lineWidth   = 2;
+    } else { // 'off' — muted X
       ctx.beginPath();
-      ctx.moveTo(cx + r*0.32, cy - r*0.55);
-      ctx.lineTo(cx + r*0.78, cy + r*0.55);
-      ctx.moveTo(cx + r*0.78, cy - r*0.55);
-      ctx.lineTo(cx + r*0.32, cy + r*0.55);
+      ctx.moveTo(cx + s * 0.2, cy - s * 0.5);
+      ctx.lineTo(cx + s * 0.9, cy + s * 0.5);
+      ctx.moveTo(cx + s * 0.9, cy - s * 0.5);
+      ctx.lineTo(cx + s * 0.2, cy + s * 0.5);
       ctx.stroke();
     }
     ctx.restore();
   },
 
-  drawEndIcon(cx, cy, r) {
+  // Power symbol: a ring with a gap at the top and a vertical bar through it.
+  drawEndIcon(cx, cy, s) {
     const { ctx } = this;
     ctx.save();
-    ctx.strokeStyle = 'rgba(255,175,55,0.92)';
-    ctx.lineWidth   = 2;
+    ctx.strokeStyle = '#8aa0bd';
+    ctx.lineWidth   = 1.8;
     ctx.lineCap     = 'round';
     ctx.beginPath();
-    ctx.moveTo(cx, cy - r*0.9);
-    ctx.lineTo(cx, cy - r*0.22);
+    ctx.arc(cx, cy, s * 0.8, (-90 + 42) * Math.PI / 180, (-90 - 42) * Math.PI / 180 + Math.PI * 2, false);
     ctx.stroke();
     ctx.beginPath();
-    ctx.arc(cx, cy, r*0.68, Math.PI*0.62, Math.PI*2.38);
+    ctx.moveTo(cx, cy - s * 1.05);
+    ctx.lineTo(cx, cy - s * 0.05);
     ctx.stroke();
     ctx.restore();
   },
@@ -1639,7 +1705,7 @@ const Game = {
   },
 
   playSound(name, rate = 1) {
-    if (!this.soundEnabled) return;
+    if (this.soundState === 'off') return;
 
     // Zero-latency path: play the pre-decoded buffer straight from memory.
     const buffer = this.soundBuffers && this.soundBuffers[name];
@@ -2143,13 +2209,9 @@ const Game = {
     this.drawTitleField();
     this.drawDecoBubbles();
 
-    ctx.save();
-    ctx.font         = '13px sans-serif';
-    ctx.textAlign    = 'center';
-    ctx.textBaseline = 'alphabetic';
-    ctx.fillStyle    = 'rgba(100,190,230,0.38)';
-    ctx.fillText('X S O L L A', CANVAS_W / 2, 66);
-    ctx.restore();
+    // Xsolla wordmark, top-left. Mirrors the HUD button column on the right,
+    // which sits at the same 28px inset and the same y.
+    drawXsollaLogo(ctx, 28, 16, 112);
 
     ctx.save();
     ctx.font      = 'bold 58px sans-serif';

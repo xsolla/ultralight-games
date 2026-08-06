@@ -1,4 +1,4 @@
-\# Xsolla Bubble Bopper
+\# Bubble Bopper
 
 
 

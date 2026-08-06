@@ -136,6 +136,7 @@ const START_SKIP_M          = 120;
 // Audio
 const SFX_VOLUME    = 0.6;
 const BGM_VOLUME    = 0.45;
+const SFX_POOL_SIZE = 4;      // HTMLAudioElements kept per sfx, played round-robin
 const MUSIC_FADE_MS = 3000;
 const MUTE_KEY      = 'xsollaCrowdRun.mute.v1';
 
@@ -1662,13 +1663,32 @@ const titleList   = document.getElementById('titleScores');
 function showTitle() { titleScreen.hidden = false; }
 function hideTitle() { titleScreen.hidden = true;  }
 
+// Xsolla wordmark on the title screen. Injected here rather than written into
+// index.html for the same reason as the button icons below — the HTML file must
+// never contain both an <svg> and a <script> tag. Markup is
+// common_assets/xsolla_logo/new-logo-dark.svg verbatim, minus its no-op clipPath.
+const titleLogo = document.getElementById('titleLogo');
+if (titleLogo) {
+  titleLogo.innerHTML = `<svg viewBox="0 4.53857 169.997 36.9211" fill="none" aria-label="Xsolla" role="img">
+    <path fill-rule="evenodd" clip-rule="evenodd" d="M73.6664 4.53827C84.0077 4.53827 92.1272 12.6598 92.1272 22.9991C92.1272 33.3383 84.0077 41.4599 73.6664 41.4599C63.3271 41.4599 55.2078 33.3383 55.2078 22.9991C55.2078 12.6598 63.3272 4.53829 73.6664 4.53827ZM73.6664 11.6001C67.4629 11.6001 62.7728 16.4937 62.7728 22.9991C62.7728 29.5065 67.4629 34.398 73.6664 34.398C79.872 34.398 84.5622 29.5065 84.5622 22.9991C84.5622 16.4937 79.872 11.6001 73.6664 11.6001Z" fill="#80EAFF"/>
+    <path d="M18.0542 16.6417L26.3277 5.34541H35.0034L22.2521 22.2765L36.0119 40.6531H26.884L17.7546 28.3332L8.725 40.6531H0.00012207L13.5575 22.6895L0.605567 5.34541H9.68396L18.0542 16.6417Z" fill="#80EAFF"/>
+    <path d="M42.9917 15.4836L49.9509 24.2107C51.4643 26.1266 52.1706 27.9419 52.1706 29.9091C52.1706 31.8763 51.4643 33.6917 49.9509 35.6097L45.9669 40.6531H36.9893L45.1088 30.2622L38.1987 21.5865C36.7367 19.7712 36.0304 18.005 36.0304 16.1404C36.0304 14.2225 36.7367 12.4584 38.1987 10.6925L42.7391 5.34541H51.5156L42.9917 15.4836Z" fill="#80EAFF"/>
+    <path d="M118.379 40.6531H109.502L90.5358 5.34541H99.4151L118.379 40.6531Z" fill="#80EAFF"/>
+    <path fill-rule="evenodd" clip-rule="evenodd" d="M116.976 5.34541L131.944 33.2089L146.393 5.34541H151.688L169.997 40.6531H127.065L108.101 5.34541H116.976ZM139.348 34.0962H158.385L148.875 15.1397L139.348 34.0962Z" fill="#80EAFF"/>
+  </svg>`;
+}
+
 // Power/exit button — only shown during active gameplay. Terminates the run and
 // returns straight to the title screen, skipping the game-over score table.
 const exitBtn = document.getElementById('exitBtn');
 // Icon injected here (not inline in index.html) so the HTML file never contains
 // both an <svg> and a <script> tag, which the mini-app validator flags as XSS.
+// Power symbol: a ring with an 84-degree gap at the top and a vertical bar
+// through it. 30-unit viewBox, so these are the reference implementation's own
+// coordinates for a 30x30 button (center 15,15, nominal half-size s=8): ring
+// r = 0.8s = 6.4 swept 276 degrees, bar from cy-1.05s to cy-0.05s.
 if (exitBtn) {
-  exitBtn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 L12 12"></path><path d="M7.5 6.5 a7 7 0 1 0 9 0"></path></svg>`;
+  exitBtn.innerHTML = `<svg viewBox="0 0 30 30" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M19.282 10.244 A6.4 6.4 0 1 1 10.718 10.244"></path><path d="M15 6.6 L15 14.6"></path></svg>`;
 }
 function showExit() { if (exitBtn) exitBtn.hidden = false; }
 function hideExit() { if (exitBtn) exitBtn.hidden = true;  }
@@ -2040,35 +2060,51 @@ function drawGameOver(ctx) {
 // ═══════════════════════════════════════════════════════════════════
 //  AUDIO
 // ═══════════════════════════════════════════════════════════════════
+const SFX_FILES = {
+  clash:        'assets/sfx/Fight_Explosion.mp3',
+  comet:        'assets/sfx/Comet_Sound.mp3',
+  button:       'assets/sfx/Button_Click.mp3',
+  gatePositive: 'assets/sfx/Gate_Positive.mp3',
+  gateNegative: 'assets/sfx/Gate_Negative.mp3',
+};
+
 const Sound = {
-  ctx:         null,      // AudioContext — created on first user interaction
   bgm:         null,      // HTMLAudioElement for BGM (streaming)
-  buffers:     {},        // id → AudioBuffer (decoded PCM held in RAM)
-  _rawBuffers: {},        // id → ArrayBuffer (pre-fetched bytes, freed after decode)
+  pools:       {},        // id → { els: [HTMLAudioElement,...], idx }
   fadeRAF:     null,
   muteState:   'on',
   musicActive: false,
 };
 
+// Sfx and music both use HTMLAudioElement so audio behaves identically under
+// file:// and http://, matching the other games in this repo.
+//
+// The Web Audio route this replaced (fetch + decodeAudioData into an
+// AudioContext) failed silently in two separate ways, in both cases leaving
+// every sfx mute while the HTMLAudio music kept playing normally:
+//   1. fetch() is blocked by CORS on file://, so no bytes ever arrived.
+//   2. Even over http://, the decode only ran for whatever had already been
+//      fetched by the time of the first playSound(); the raw-byte map was then
+//      discarded, so any fetch landing later was never decoded.
+// Neither path reported an error, because both swallowed rejections.
 function initAudio() {
   Sound.bgm = new Audio('assets/bgm/XsollaCrowsdRunnerBGM.mp3');
   Sound.bgm.loop   = true;
   Sound.bgm.volume = 0;
 
-  const files = {
-    clash:        'assets/sfx/Fight_Explosion.mp3',
-    comet:        'assets/sfx/Comet_Sound.mp3',
-    button:       'assets/sfx/Button_Click.mp3',
-    gatePositive: 'assets/sfx/Gate_Positive.mp3',
-    gateNegative: 'assets/sfx/Gate_Negative.mp3',
-  };
-  // Pre-fetch all SFX bytes into RAM. AudioContext is created lazily on
-  // first user interaction to satisfy the browser autoplay policy.
-  for (const [id, url] of Object.entries(files)) {
-    fetch(url)
-      .then(r => r.arrayBuffer())
-      .then(ab => { Sound._rawBuffers[id] = ab; })
-      .catch(() => {});
+  // A small per-sound pool, played round-robin, lets the same sfx overlap
+  // (rapid gates, a burst of clashes) without cutting itself off, and replaying
+  // rewinds a cached element instead of re-reading the file.
+  for (const [id, url] of Object.entries(SFX_FILES)) {
+    const els = [];
+    for (let i = 0; i < SFX_POOL_SIZE; i++) {
+      const a = new Audio(url);
+      a.preload = 'auto';
+      a.volume  = SFX_VOLUME;
+      try { a.load(); } catch (e) { /* ignore */ }
+      els.push(a);
+    }
+    Sound.pools[id] = { els, idx: 0 };
   }
 
   const saved = localStorage.getItem(MUTE_KEY);
@@ -2076,37 +2112,17 @@ function initAudio() {
   updateSoundButton();
 }
 
-// Creates the AudioContext on first call and decodes all pre-fetched
-// ArrayBuffers into AudioBuffers (raw PCM in RAM). Subsequent calls
-// just resume a suspended context — no decoding, no I/O.
-function _ensureCtx() {
-  if (Sound.ctx) {
-    if (Sound.ctx.state === 'suspended') Sound.ctx.resume();
-    return Promise.resolve();
-  }
-  Sound.ctx = new (window.AudioContext || window.webkitAudioContext)();
-  const jobs = Object.entries(Sound._rawBuffers).map(([id, ab]) =>
-    Sound.ctx.decodeAudioData(ab)
-      .then(buf => { Sound.buffers[id] = buf; })
-      .catch(() => {})
-  );
-  Sound._rawBuffers = {};   // free raw bytes — AudioBuffers are now the source
-  return Promise.all(jobs);
-}
-
 function playSound(id) {
   if (Sound.muteState === 'off') return;
-  _ensureCtx().then(() => {
-    const buf = Sound.buffers[id];
-    if (!buf) return;
-    const src  = Sound.ctx.createBufferSource();
-    const gain = Sound.ctx.createGain();
-    src.buffer      = buf;
-    gain.gain.value = SFX_VOLUME;
-    src.connect(gain);
-    gain.connect(Sound.ctx.destination);
-    src.start(0);
-  });
+  const pool = Sound.pools[id];
+  if (!pool) return;
+  const a = pool.els[pool.idx];
+  pool.idx = (pool.idx + 1) % pool.els.length;
+  try {
+    a.volume = SFX_VOLUME;
+    a.currentTime = 0;
+    a.play().catch(() => {});
+  } catch (e) { /* ignore */ }
 }
 
 function startMusic() {
@@ -2147,21 +2163,24 @@ function cancelMusicFade() {
   if (Sound.fadeRAF) { cancelAnimationFrame(Sound.fadeRAF); Sound.fadeRAF = null; }
 }
 
+// 30-unit viewBox, so 1 SVG unit = 1 logical px and every number below is the
+// reference implementation's own arithmetic for a 30x30 button (center 15,15,
+// nominal half-size s=8) — including the 1.6 stroke width. The slash on
+// musicOff is currentColor, not red: one color per state, as on canvas.
 const SOUND_ICONS = {
-  on: `<svg viewBox="0 0 24 24" aria-hidden="true">
-    <path d="M3 9 h3 l4 -3 v12 l-4 -3 h-3 z" fill="currentColor"/>
-    <path d="M13 8.5 a5 5 0 0 1 0 7" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
-    <path d="M16 6 a9 9 0 0 1 0 12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+  on: `<svg viewBox="0 0 30 30" aria-hidden="true">
+    <path d="M8.2 13 H11 L14.6 10.2 V19.8 L11 17 H8.2 Z" fill="currentColor"/>
+    <path d="M17.965 12.165 A4.4 4.4 0 0 1 17.965 17.835" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+    <path d="M20.413 10.104 A7.6 7.6 0 0 1 20.413 19.896" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
   </svg>`,
-  musicOff: `<svg viewBox="0 0 24 24" aria-hidden="true">
-    <path d="M9 18 v-9 l9 -2.5 v9" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
-    <circle cx="7" cy="18" r="2.2" fill="currentColor"/>
-    <circle cx="16" cy="15.5" r="2.2" fill="currentColor"/>
-    <path d="M4 4 l16 16" stroke="#f87171" stroke-width="2.2" stroke-linecap="round"/>
+  musicOff: `<svg viewBox="0 0 30 30" aria-hidden="true">
+    <ellipse cx="11.56" cy="19" rx="2.4" ry="1.76" transform="rotate(-22.918 11.56 19)" fill="currentColor"/>
+    <path d="M13.8 19 L13.8 10.2 L17.8 11.8" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M7.8 22.2 L22.2 7.8" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
   </svg>`,
-  off: `<svg viewBox="0 0 24 24" aria-hidden="true">
-    <path d="M3 9 h3 l4 -3 v12 l-4 -3 h-3 z" fill="currentColor"/>
-    <path d="M14 9 l6 6 M20 9 l-6 6" fill="none" stroke="#f87171" stroke-width="2" stroke-linecap="round"/>
+  off: `<svg viewBox="0 0 30 30" aria-hidden="true">
+    <path d="M8.2 13 H11 L14.6 10.2 V19.8 L11 17 H8.2 Z" fill="currentColor"/>
+    <path d="M16.6 11 L22.2 19 M22.2 11 L16.6 19" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
   </svg>`,
 };
 const SOUND_TITLES = { on: 'Sound: on', musicOff: 'Music muted (effects on)', off: 'Muted' };
@@ -2172,6 +2191,8 @@ function updateSoundButton() {
   btn.innerHTML = SOUND_ICONS[Sound.muteState];
   btn.title     = SOUND_TITLES[Sound.muteState];
   btn.setAttribute('aria-label', SOUND_TITLES[Sound.muteState]);
+  // Bright only while fully on, dim otherwise — same as the canvas games.
+  btn.style.color = Sound.muteState === 'on' ? '#e6eef8' : '#8aa0bd';
 }
 
 function applyMuteState() {

@@ -1,4 +1,4 @@
-# Xsolla Hexxagon
+# Hexxagon
 
 A browser Hexxagon clone (Ataxx-style): two factions battle for control of a
 hexagonal board via clone/jump moves and adjacency conversions.

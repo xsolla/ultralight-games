@@ -38,6 +38,7 @@ const Game = {
 
   time: 0, // ms accumulator; drives idle animations (blob blink, etc.)
   lastFrameTs: null,
+  hudHover: null, // 'audio' | 'exit' | null — which HUD button is hovered
 
   init() {
     this.canvas = document.getElementById('game-canvas');
@@ -55,6 +56,8 @@ const Game = {
     this.canvas.addEventListener('mousedown', (e) => this.handleMouseDown(e));
     window.addEventListener('mouseup', (e) => this.handleMouseUp(e));
     this.canvas.addEventListener('click', (e) => this.handleCanvasClick(e));
+    this.canvas.addEventListener('mousemove', (e) => this.handleMouseMove(e));
+    this.canvas.addEventListener('mouseleave', () => { this.hudHover = null; });
 
     requestAnimationFrame((ts) => this.loop(ts));
   },
@@ -151,6 +154,8 @@ const Game = {
   goToMenu() {
     Sound.stopMusic(true);
     this.screen = 'menu';
+    this.hudHover = null;
+    this.canvas.style.cursor = 'default';
   },
 
   // Called once a well's own chain fully resolves. Sends garbage to the
@@ -323,10 +328,27 @@ const Game = {
 
   // Title-screen / win-dialog button clicks (Menu owns its own layout and
   // hit-testing; the win dialog's small button set is handled right here).
-  handleCanvasClick(e) {
+  // Pointer position in the fixed 800x600 logical space.
+  eventToCanvas(e) {
     const rect = this.canvas.getBoundingClientRect();
-    const x = ((e.clientX - rect.left) / rect.width) * CANVAS_W;
-    const y = ((e.clientY - rect.top) / rect.height) * CANVAS_H;
+    return {
+      x: ((e.clientX - rect.left) / rect.width) * CANVAS_W,
+      y: ((e.clientY - rect.top) / rect.height) * CANVAS_H,
+    };
+  },
+
+  // HUD buttons live on the gameplay screens only, but stay active above the
+  // game-over/win dialogs — so hover is tracked for the whole screen.
+  handleMouseMove(e) {
+    const onGameplay = this.screen === 'single' || this.screen === 'multiplayer';
+    const p = this.eventToCanvas(e);
+    this.hudHover = onGameplay ? this.hudButtonAt(p.x, p.y) : null;
+    const cursor = this.hudHover ? 'pointer' : 'default';
+    if (this.canvas.style.cursor !== cursor) this.canvas.style.cursor = cursor;
+  },
+
+  handleCanvasClick(e) {
+    const { x, y } = this.eventToCanvas(e);
 
     if (this.screen === 'menu') { Menu.handleClick(x, y); return; }
 
@@ -351,11 +373,17 @@ const Game = {
   // (on -> music off -> all off -> on) and immediate exit to the title
   // screen. Fixed logical-space layout, same spot in Single Player and
   // Multiplayer since both share the same TOP_MARGIN header strip.
+  //
+  // Size/inset/colors/icons match the other three games (Game3/js/render.js is
+  // the reference), but the pair stays side by side rather than stacked: this
+  // header strip is only TOP_MARGIN (64px) tall, so a second 30px row at y=52
+  // would spill onto the well — in Multiplayer directly over P2's top-right
+  // cells, whose right edge reaches x~770.
   _hudLayout: null,
   getHudLayout() {
     if (this._hudLayout) return this._hudLayout;
-    const btnSize = 34, gap = 10, margin = 14;
-    const y = margin;
+    const btnSize = 30, gap = 6, margin = 28;
+    const y = 16;
     const exitX = CANVAS_W - margin - btnSize;
     const audioX = exitX - gap - btnSize;
     this._hudLayout = {
@@ -370,6 +398,14 @@ const Game = {
     if (this.hitTest(x, y, hud.audioBtn.rect)) { this.cycleAudioMode(); return true; }
     if (this.hitTest(x, y, hud.exitBtn.rect)) { this.goToMenu(); return true; }
     return false;
+  },
+
+  // Which HUD icon button, if any, is under the given logical-space point.
+  hudButtonAt(x, y) {
+    const hud = this.getHudLayout();
+    if (this.hitTest(x, y, hud.audioBtn.rect)) return 'audio';
+    if (this.hitTest(x, y, hud.exitBtn.rect)) return 'exit';
+    return null;
   },
 
   cycleAudioMode() {
@@ -750,7 +786,7 @@ const Game = {
       });
     }
 
-    Renderer.drawHudButtons(ctx, this.getHudLayout(), Sound.mode);
+    Renderer.drawHudButtons(ctx, this.getHudLayout(), Sound.mode, this.hudHover);
   },
 
   renderMultiplayer(ctx) {
@@ -769,6 +805,6 @@ const Game = {
       Renderer.drawWinDialog(ctx, this.getWinDialogLayout(), label);
     }
 
-    Renderer.drawHudButtons(ctx, this.getHudLayout(), Sound.mode);
+    Renderer.drawHudButtons(ctx, this.getHudLayout(), Sound.mode, this.hudHover);
   },
 };

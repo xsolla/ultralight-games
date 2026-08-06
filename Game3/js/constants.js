@@ -99,6 +99,7 @@ const COLORS = {
   btnFill: 'rgba(255, 255, 255, 0.045)',
   btnStroke: 'rgba(150, 180, 220, 0.30)',
   btnHoverFill: 'rgba(255, 255, 255, 0.09)',
+  btnHoverStroke: 'rgba(150, 180, 220, 0.55)',
   btnSelFill: 'rgba(79, 180, 255, 0.20)',
   btnSelStroke: '#4fb4ff',
   btnDisabledText: 'rgba(160, 180, 205, 0.35)',

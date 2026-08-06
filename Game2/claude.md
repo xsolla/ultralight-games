@@ -1,4 +1,4 @@
-# Xsolla Crowd Run
+# Crowd Run
 *(working title — rename freely)*
 
 ---

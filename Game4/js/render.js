@@ -2,9 +2,40 @@
 // falling piece, score pop-ups, header/panels, game-over. Game logic never
 // lives here — everything comes in as plain data.
 
+// Xsolla wordmark, traced verbatim from
+// common_assets/xsolla_logo/new-logo-dark.svg (viewBox 0 0 171 46). Kept as
+// path data rather than an <img>/asset file so the game folder stays
+// self-contained and there is no async load to wait on. The artwork occupies
+// x 0..169.997, y 4.53857..41.46 of the source viewBox.
+const XSOLLA_LOGO_PATHS = [
+  'M73.6664 4.53827C84.0077 4.53827 92.1272 12.6598 92.1272 22.9991C92.1272 33.3383 84.0077 41.4599 73.6664 41.4599C63.3271 41.4599 55.2078 33.3383 55.2078 22.9991C55.2078 12.6598 63.3272 4.53829 73.6664 4.53827ZM73.6664 11.6001C67.4629 11.6001 62.7728 16.4937 62.7728 22.9991C62.7728 29.5065 67.4629 34.398 73.6664 34.398C79.872 34.398 84.5622 29.5065 84.5622 22.9991C84.5622 16.4937 79.872 11.6001 73.6664 11.6001Z',
+  'M18.0542 16.6417L26.3277 5.34541H35.0034L22.2521 22.2765L36.0119 40.6531H26.884L17.7546 28.3332L8.725 40.6531H0.00012207L13.5575 22.6895L0.605567 5.34541H9.68396L18.0542 16.6417Z',
+  'M42.9917 15.4836L49.9509 24.2107C51.4643 26.1266 52.1706 27.9419 52.1706 29.9091C52.1706 31.8763 51.4643 33.6917 49.9509 35.6097L45.9669 40.6531H36.9893L45.1088 30.2622L38.1987 21.5865C36.7367 19.7712 36.0304 18.005 36.0304 16.1404C36.0304 14.2225 36.7367 12.4584 38.1987 10.6925L42.7391 5.34541H51.5156L42.9917 15.4836Z',
+  'M118.379 40.6531H109.502L90.5358 5.34541H99.4151L118.379 40.6531Z',
+  'M116.976 5.34541L131.944 33.2089L146.393 5.34541H151.688L169.997 40.6531H127.065L108.101 5.34541H116.976ZM139.348 34.0962H158.385L148.875 15.1397L139.348 34.0962Z',
+];
+const XSOLLA_LOGO_W = 169.997;   // artwork width in source units
+const XSOLLA_LOGO_Y0 = 4.53857;  // artwork's top edge in source units
+const XSOLLA_LOGO_FILL = '#80EAFF';
+
 const Renderer = {
   trayCache: null,
   trayCacheKey: null,
+  xsollaLogoCache: null, // Path2D objects, built once on first draw
+
+  // (x, y) is the top-left of the visible artwork; w is its width in logical
+  // px. Every path is filled 'evenodd' — required by the two glyphs with holes
+  // (the O and the A) and identical to nonzero for the other three.
+  drawXsollaLogo(ctx, x, y, w) {
+    if (!this.xsollaLogoCache) this.xsollaLogoCache = XSOLLA_LOGO_PATHS.map((d) => new Path2D(d));
+    const s = w / XSOLLA_LOGO_W;
+    ctx.save();
+    ctx.translate(x, y - XSOLLA_LOGO_Y0 * s);
+    ctx.scale(s, s);
+    ctx.fillStyle = XSOLLA_LOGO_FILL;
+    for (const p of this.xsollaLogoCache) ctx.fill(p, 'evenodd');
+    ctx.restore();
+  },
 
   roundRect(ctx, x, y, w, h, r) {
     ctx.beginPath();
@@ -272,105 +303,101 @@ const Renderer = {
   // HUD icon buttons (audio mode toggle, exit-to-menu) — top-right corner of
   // every gameplay screen, drawn last so they stay visible/clickable above
   // the game-over/win dialog overlays. Icon-only, no text labels.
-  drawHudIconButton(ctx, rect, drawIcon) {
+  drawHudIconButton(ctx, rect, hovered, drawIcon) {
     ctx.save();
     this.roundRect(ctx, rect.x, rect.y, rect.w, rect.h, 8);
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.06)';
+    ctx.fillStyle = hovered ? 'rgba(255, 255, 255, 0.09)' : 'rgba(255, 255, 255, 0.045)';
     ctx.fill();
     ctx.lineWidth = 1;
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.14)';
+    ctx.strokeStyle = hovered ? 'rgba(150, 180, 220, 0.55)' : 'rgba(150, 180, 220, 0.30)';
     ctx.stroke();
-    drawIcon(ctx, rect.x + rect.w / 2, rect.y + rect.h / 2, rect.w * 0.32);
+    drawIcon(ctx, rect.x + rect.w / 2, rect.y + rect.h / 2, 8);
     ctx.restore();
   },
 
-  // mode: 'on' (full volume, two waves), 'music-off' (sfx only — one wave +
-  // a struck-through note badge), 'off' (whole glyph slashed).
+  // mode: 'on' (speaker + two waves), 'music-off' (slashed note — sfx still
+  // audible), 'off' (speaker + X). s is the icon's nominal half-size.
   drawSpeakerIcon(ctx, cx, cy, s, mode) {
-    const color = mode === 'off' ? '#5b6272' : '#e7eaf2';
+    const TAU = Math.PI * 2;
+    const color = mode === 'on' ? '#e6eef8' : '#8aa0bd';
     ctx.save();
     ctx.translate(cx, cy);
     ctx.fillStyle = color;
     ctx.strokeStyle = color;
-    ctx.lineWidth = Math.max(1.4, s * 0.16);
+    ctx.lineWidth = 1.6;
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
 
+    if (mode === 'music-off') {
+      const nx = -s * 0.15;
+      ctx.beginPath();
+      ctx.ellipse(nx - s * 0.28, s * 0.5, s * 0.3, s * 0.22, -0.4, 0, TAU);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.moveTo(nx, s * 0.5);
+      ctx.lineTo(nx, -s * 0.6);
+      ctx.lineTo(nx + s * 0.5, -s * 0.4);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(-s * 0.9, s * 0.9);
+      ctx.lineTo(s * 0.9, -s * 0.9);
+      ctx.stroke();
+      ctx.restore();
+      return;
+    }
+
+    // Speaker body (used by 'on' and 'off').
     ctx.beginPath();
-    ctx.moveTo(-s * 0.95, -s * 0.32);
-    ctx.lineTo(-s * 0.35, -s * 0.32);
-    ctx.lineTo(s * 0.2, -s * 0.8);
-    ctx.lineTo(s * 0.2, s * 0.8);
-    ctx.lineTo(-s * 0.35, s * 0.32);
-    ctx.lineTo(-s * 0.95, s * 0.32);
+    ctx.moveTo(-s * 0.85, -s * 0.25);
+    ctx.lineTo(-s * 0.5, -s * 0.25);
+    ctx.lineTo(-s * 0.05, -s * 0.6);
+    ctx.lineTo(-s * 0.05, s * 0.6);
+    ctx.lineTo(-s * 0.5, s * 0.25);
+    ctx.lineTo(-s * 0.85, s * 0.25);
     ctx.closePath();
     ctx.fill();
 
     if (mode === 'on') {
       ctx.beginPath();
-      ctx.arc(s * 0.2, 0, s * 0.5, -Math.PI / 3.4, Math.PI / 3.4);
+      ctx.arc(-s * 0.05, 0, s * 0.55, -0.7, 0.7);
       ctx.stroke();
       ctx.beginPath();
-      ctx.arc(s * 0.2, 0, s * 0.85, -Math.PI / 3.4, Math.PI / 3.4);
+      ctx.arc(-s * 0.05, 0, s * 0.95, -0.7, 0.7);
       ctx.stroke();
-    } else if (mode === 'music-off') {
+    } else { // 'off' — muted X
       ctx.beginPath();
-      ctx.arc(s * 0.2, 0, s * 0.5, -Math.PI / 3.4, Math.PI / 3.4);
-      ctx.stroke();
-
-      const nx = s * 0.55, ny = -s * 0.62, nr = s * 0.15;
-      ctx.beginPath();
-      ctx.arc(nx, ny, nr, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.beginPath();
-      ctx.moveTo(nx + nr, ny);
-      ctx.lineTo(nx + nr, ny - s * 0.45);
-      ctx.stroke();
-      ctx.beginPath();
-      ctx.moveTo(nx - s * 0.26, ny - s * 0.26);
-      ctx.lineTo(nx + s * 0.26, ny + s * 0.26);
-      ctx.stroke();
-    } else {
-      ctx.beginPath();
-      ctx.moveTo(-s * 0.95, -s * 0.95);
-      ctx.lineTo(s * 0.95, s * 0.95);
+      ctx.moveTo(s * 0.2, -s * 0.5);
+      ctx.lineTo(s * 0.9, s * 0.5);
+      ctx.moveTo(s * 0.9, -s * 0.5);
+      ctx.lineTo(s * 0.2, s * 0.5);
       ctx.stroke();
     }
     ctx.restore();
   },
 
-  // A door frame with an arrow passing out through it — universal "exit".
+  // Power symbol: a ring with a gap at the top and a vertical bar through it.
   drawExitIcon(ctx, cx, cy, s) {
     ctx.save();
     ctx.translate(cx, cy);
-    ctx.strokeStyle = '#e7eaf2';
-    ctx.lineWidth = Math.max(1.4, s * 0.16);
+    ctx.strokeStyle = '#8aa0bd';
+    ctx.lineWidth = 1.8;
     ctx.lineCap = 'round';
-    ctx.lineJoin = 'round';
 
     ctx.beginPath();
-    ctx.moveTo(-s * 0.1, -s * 0.85);
-    ctx.lineTo(-s * 0.85, -s * 0.85);
-    ctx.lineTo(-s * 0.85, s * 0.85);
-    ctx.lineTo(-s * 0.1, s * 0.85);
+    ctx.arc(0, 0, s * 0.8, (-90 + 42) * Math.PI / 180, (-90 - 42) * Math.PI / 180 + Math.PI * 2, false);
     ctx.stroke();
-
     ctx.beginPath();
-    ctx.moveTo(-s * 0.6, 0);
-    ctx.lineTo(s * 0.7, 0);
-    ctx.stroke();
-
-    ctx.beginPath();
-    ctx.moveTo(s * 0.32, -s * 0.38);
-    ctx.lineTo(s * 0.78, 0);
-    ctx.lineTo(s * 0.32, s * 0.38);
+    ctx.moveTo(0, -s * 1.05);
+    ctx.lineTo(0, -s * 0.05);
     ctx.stroke();
     ctx.restore();
   },
 
-  drawHudButtons(ctx, hud, audioMode) {
-    this.drawHudIconButton(ctx, hud.audioBtn.rect, (c, x, y, s) => this.drawSpeakerIcon(c, x, y, s, audioMode));
-    this.drawHudIconButton(ctx, hud.exitBtn.rect, (c, x, y, s) => this.drawExitIcon(c, x, y, s));
+  drawHudButtons(ctx, hud, audioMode, hudHover) {
+    this.drawHudIconButton(ctx, hud.audioBtn.rect, hudHover === 'audio',
+      (c, x, y, s) => this.drawSpeakerIcon(c, x, y, s, audioMode));
+    this.drawHudIconButton(ctx, hud.exitBtn.rect, hudHover === 'exit',
+      (c, x, y, s) => this.drawExitIcon(c, x, y, s));
   },
 
   // Small row of dots in the match's actual active colors — shows what's

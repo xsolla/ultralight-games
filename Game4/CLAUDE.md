@@ -1,4 +1,4 @@
-# Xsolla Cascadia
+# Cascadia
 
 A browser falling-piece match-3 game (Columns-style): 1×3 tiles of colored
 tokens drop into a 6-wide well, rotate and slide before locking, then trigger

@@ -1,4 +1,4 @@
-/* Xsolla Hexxagon — canvas scaling & page chrome.
+/* Hexxagon — canvas scaling & page chrome.
    The game is authored in a fixed 800x600 logical coordinate space, but the
    canvas backing store is sized to the display's real device pixels (see
    resizeCanvas() in game.js) so text and lines stay crisp instead of being

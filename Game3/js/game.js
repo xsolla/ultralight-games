@@ -23,6 +23,7 @@ const Game = {
   menuButtons: [],          // populated by drawMenu each frame, for hit-testing
   powerBtnRect: null,       // in-game power button (return to menu) rect
   soundBtnRect: null,       // in-game sound button rect
+  hudHover: null,           // 'sound' | 'power' | null — which HUD button is hovered
   soundState: 'on',         // 'on' | 'musicoff' | 'off' (cosmetic for now)
 
   // Turn / interaction state.
@@ -54,7 +55,10 @@ const Game = {
 
     this.canvas.addEventListener('pointerdown', (e) => this.onPointerDown(e));
     this.canvas.addEventListener('pointermove', (e) => this.onPointerMove(e));
-    this.canvas.addEventListener('pointerleave', () => { this.hoverCell = null; });
+    this.canvas.addEventListener('pointerleave', () => {
+      this.hoverCell = null;
+      this.hudHover = null;
+    });
 
     // Start on the title screen. Build an initial board so the loop has one.
     this.screen = 'menu';
@@ -164,6 +168,8 @@ const Game = {
   returnToMenu() {
     this.screen = 'menu';
     this.clearSelection();
+    this.hudHover = null;
+    this.canvas.style.cursor = 'default';
     Sound.stopMusic();
   },
 
@@ -233,10 +239,25 @@ const Game = {
   },
 
   onPointerMove(e) {
-    if (this.screen !== 'playing' || this.gameOver) { this.hoverCell = null; return; }
     const p = this.eventToCanvas(e);
+
+    // HUD buttons exist on the playing screen only, but stay live at game over
+    // — so their hover is resolved ahead of the board-hover early-out below.
+    this.hudHover = this.screen === 'playing' ? this.hudButtonAt(p) : null;
+    const cursor = this.hudHover ? 'pointer' : 'default';
+    if (this.canvas.style.cursor !== cursor) this.canvas.style.cursor = cursor;
+
+    if (this.screen !== 'playing' || this.gameOver) { this.hoverCell = null; return; }
     const { q, r } = pixelToAxial(p.x, p.y, this.board.size, this.board.origin);
     this.hoverCell = inBounds(this.board, q, r) ? { q, r } : null;
+  },
+
+  // Which HUD icon button, if any, is under the given logical-space point.
+  hudButtonAt(p) {
+    const inRect = (r) => r && p.x >= r.x && p.x <= r.x + r.w && p.y >= r.y && p.y <= r.y + r.h;
+    if (inRect(this.soundBtnRect)) return 'sound';
+    if (inRect(this.powerBtnRect)) return 'power';
+    return null;
   },
 
   onMenuClick(p) {
@@ -254,11 +275,10 @@ const Game = {
   },
 
   onBoardClick(p) {
-    const inRect = (r) => r && p.x >= r.x && p.x <= r.x + r.w && p.y >= r.y && p.y <= r.y + r.h;
-
     // HUD icon buttons always respond (even mid-conversion / at game over).
-    if (inRect(this.soundBtnRect)) { this.cycleSound(); return; }
-    if (inRect(this.powerBtnRect)) { Sound.play('ui_click'); this.returnToMenu(); return; }
+    const hud = this.hudButtonAt(p);
+    if (hud === 'sound') { this.cycleSound(); return; }
+    if (hud === 'power') { Sound.play('ui_click'); this.returnToMenu(); return; }
 
     // Block board input while a conversion is resolving (turn hasn't advanced yet).
     if (this.busy) return;

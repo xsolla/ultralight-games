@@ -70,12 +70,16 @@ function drawMenu(ctx, game) {
   drawBackground(ctx);
   drawAmbiance(ctx, AMBIANCE_MENU, game.time);
 
+  // Xsolla wordmark, top-left. Mirrors the HUD button column on the right,
+  // which sits at the same LAYOUT.MARGIN inset and the same y.
+  drawXsollaLogo(ctx, LAYOUT.MARGIN, 16, 112);
+
   // Title + tagline.
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   ctx.fillStyle = COLORS.headerText;
   ctx.font = '700 38px system-ui, sans-serif';
-  const title = 'Xsolla Hexxagon';
+  const title = 'Hexxagon';
   ctx.fillText(title, CANVAS_W / 2, MENU.titleY);
 
   const halfW = ctx.measureText(title).width / 2;
