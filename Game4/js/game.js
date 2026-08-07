@@ -28,10 +28,22 @@ const Game = {
   // winner once someone tops out.
   mp: null,
 
-  // Drag-to-swipe gesture tracking for mouse input (mirrors touch: a swipe
-  // moves/cycles the piece, a double-click/double-tap hard-drops it). Mouse
-  // always drives Single Player's well, or Player 1's in Multiplayer.
-  mouse: { active: false, startX: 0, startY: 0, lastClickTs: 0 },
+  // Mouse and touch share one drag-to-swipe gesture model (dominant-axis
+  // swipe moves/cycles the piece, two quick taps hard-drop it); they differ
+  // only in which well a gesture may drive. The mouse always drives Single
+  // Player's well or Player 1's, while a touch drives whichever well owns the
+  // canvas half it started in — see gestureTargetAt / mouseGestureTarget.
+  mouse: { active: false, startX: 0, startY: 0, target: null },
+
+  // Live touches keyed by Touch.identifier, one entry per finger. Each is
+  // resolved independently on touchend, so in Multiplayer two players' fingers
+  // never share gesture state and can swipe/drop at the same time.
+  touches: new Map(),
+
+  // Last tap/click timestamp per gesture target, so a double tap on one well
+  // can never hard-drop the other player's piece.
+  lastTapTs: { sp: 0, p1: 0, p2: 0 },
+  _mouseSuppressedUntilTs: 0,
 
   _winDialogLayout: null,
   _gameOverLayout: null,
@@ -68,6 +80,13 @@ const Game = {
     this.canvas.addEventListener('click', (e) => this.handleCanvasClick(e));
     this.canvas.addEventListener('mousemove', (e) => this.handleMouseMove(e));
     this.canvas.addEventListener('mouseleave', () => { this.hudHover = null; });
+
+    // Not passive: these preventDefault() to kill page scroll/pinch-zoom and
+    // the synthetic mouse events a tap would otherwise fire.
+    this.canvas.addEventListener('touchstart', (e) => this.handleTouchStart(e), { passive: false });
+    this.canvas.addEventListener('touchmove', (e) => this.handleTouchMove(e), { passive: false });
+    this.canvas.addEventListener('touchend', (e) => this.handleTouchEnd(e), { passive: false });
+    this.canvas.addEventListener('touchcancel', (e) => this.handleTouchCancel(e));
 
     requestAnimationFrame((ts) => this.loop(ts));
   },
@@ -122,7 +141,7 @@ const Game = {
     this.sp.scoreboardResult = null;
     this.spMatchElapsedSec = 0;
     this.spFallIntervalMs = FALL_SPEED.BASE_MS;
-    this.mouse.active = false;
+    this.resetPointerState();
     this.screen = 'single';
     Sound.playMusicForTileset(tilesetId);
   },
@@ -151,7 +170,7 @@ const Game = {
     };
     this.mp.p1 = this.createWellState(varietyCount, activeColors, (total) => this.handleChainDone(this.mp.p1, this.mp.p2, total));
     this.mp.p2 = this.createWellState(varietyCount, activeColors, (total) => this.handleChainDone(this.mp.p2, this.mp.p1, total));
-    this.mouse.active = false;
+    this.resetPointerState();
     this.screen = 'multiplayer';
     this.currentTilesetId = tilesetId;
     Sound.playMusicForTileset(tilesetId);
@@ -164,6 +183,7 @@ const Game = {
   goToMenu() {
     Sound.stopMusic(true);
     this.screen = 'menu';
+    this.resetPointerState();
     this.hudHover = null;
     this.canvas.style.cursor = 'default';
   },
@@ -277,45 +297,69 @@ const Game = {
     this.lockAndResolve(well);
   },
 
-  // Mouse always drives Single Player's well, or Player 1's in Multiplayer —
-  // Player 2 stays keyboard-only (arrows/Enter).
-  activeMouseWell() {
-    if (this.screen === 'single') return this.sp;
-    if (this.screen === 'multiplayer') return this.mp.p1;
+  // ---- Pointer gestures (mouse drag + touch swipe), shared plumbing -----
+  //
+  // A gesture is bound to a "target" the moment it starts: 'sp' / 'p1' / 'p2'
+  // for a well, or 'ui' for a point that wants a plain tap (menu, dialog, HUD
+  // button) instead of a piece gesture. Binding at the start means a swipe is
+  // still credited to the well it began over even if it ends elsewhere.
+
+  // Which target a *touch* starting at this logical-space point drives. This
+  // is the side-aware path: in Multiplayer the canvas splits down the middle,
+  // exactly matching the two visual zones computeMultiplayerLayout lays out
+  // (P1's well+preview left of center, P2's right of it), so both players can
+  // drive their own well from their own side of a shared touchscreen.
+  gestureTargetAt(x, y) {
+    if (this.screen === 'menu') return 'ui';
+    if (this.hudButtonAt(x, y)) return 'ui';
+    if (this.screen === 'single') return this.sp.toppedOut ? 'ui' : 'sp';
+    if (this.screen === 'multiplayer') {
+      if (this.mp.winner) return 'ui'; // the win dialog owns every tap
+      return x < CANVAS_W / 2 ? 'p1' : 'p2';
+    }
     return null;
   },
 
-  handleMouseDown(e) {
-    if (e.button !== 0) return; // left button only
-    const well = this.activeMouseWell();
-    if (!well) return;
-    if (this.screen === 'multiplayer' && this.mp.winner) return;
-    if (well.toppedOut || well.resolve) return;
-    this.mouse.active = true;
-    this.mouse.startX = e.clientX;
-    this.mouse.startY = e.clientY;
-    e.preventDefault();
+  // A *mouse* gesture always drives Single Player's well, or Player 1's in
+  // Multiplayer, wherever on the canvas it happens — Player 2 is keyboard-
+  // and-touch-only, so a shared screen's single mouse can't interfere with
+  // the other player's well (CLAUDE.md Controls).
+  mouseGestureTarget() {
+    if (this.screen === 'single') return 'sp';
+    if (this.screen === 'multiplayer') return 'p1';
+    return null;
   },
 
-  handleMouseUp(e) {
-    if (!this.mouse.active) return;
-    this.mouse.active = false;
-    const well = this.activeMouseWell();
-    if (!well) return;
-    if (this.screen === 'multiplayer' && this.mp.winner) return;
-    if (well.toppedOut || well.resolve) return;
+  wellForTarget(target) {
+    if (target === 'sp') return this.screen === 'single' ? this.sp : null;
+    if (target === 'p1') return this.screen === 'multiplayer' ? this.mp.p1 : null;
+    if (target === 'p2') return this.screen === 'multiplayer' ? this.mp.p2 : null;
+    return null;
+  },
 
-    const dx = e.clientX - this.mouse.startX;
-    const dy = e.clientY - this.mouse.startY;
-    const dist = Math.hypot(dx, dy);
+  // A well only accepts gestures while it actually has a controllable piece —
+  // same guard the keyboard paths use.
+  canControlWell(well) {
+    if (!well) return false;
+    if (this.screen === 'multiplayer' && this.mp.winner) return false;
+    return !well.toppedOut && !well.resolve;
+  },
 
-    if (dist < INPUT.SWIPE_THRESHOLD_PX) {
-      // short drag / plain click — check for a double-click to hard-drop
-      if (this.mouse.lastClickTs && e.timeStamp - this.mouse.lastClickTs <= INPUT.DOUBLE_CLICK_MS) {
-        this.mouse.lastClickTs = 0;
+  // One completed gesture on a well: short means a tap (two in quick
+  // succession hard-drop), longer means a dominant-axis swipe. Controllability
+  // is re-checked here rather than only at gesture start, so a swipe begun
+  // while the well was mid-cascade still lands if the chain finished first.
+  applyPointerGesture(target, dx, dy, ts) {
+    const well = this.wellForTarget(target);
+    if (!this.canControlWell(well)) return;
+
+    if (Math.hypot(dx, dy) < INPUT.SWIPE_THRESHOLD_PX) {
+      const prev = this.lastTapTs[target] || 0;
+      if (prev && ts - prev <= INPUT.DOUBLE_CLICK_MS) {
+        this.lastTapTs[target] = 0;
         this.hardDrop(well);
       } else {
-        this.mouse.lastClickTs = e.timeStamp;
+        this.lastTapTs[target] = ts;
       }
       return;
     }
@@ -323,8 +367,108 @@ const Game = {
     this.resolveSwipeGesture(well, dx, dy);
   },
 
-  // Shared by mouse and (future) touch: dominant-axis swipe maps to
-  // move/cycle, same as the touch controls in CLAUDE.md.
+  resetPointerState() {
+    this.mouse.active = false;
+    this.mouse.target = null;
+    this.touches.clear();
+    this.lastTapTs = { sp: 0, p1: 0, p2: 0 };
+  },
+
+  handleMouseDown(e) {
+    if (e.button !== 0) return; // left button only
+    if (this.mouseSuppressed(e)) return;
+    const target = this.mouseGestureTarget();
+    if (!this.canControlWell(this.wellForTarget(target))) return;
+    const p = this.eventToCanvas(e);
+    if (this.hudButtonAt(p.x, p.y)) return; // HUD buttons take plain clicks
+    this.mouse.active = true;
+    this.mouse.target = target;
+    this.mouse.startX = p.x;
+    this.mouse.startY = p.y;
+    e.preventDefault();
+  },
+
+  handleMouseUp(e) {
+    if (!this.mouse.active) return;
+    this.mouse.active = false;
+    const p = this.eventToCanvas(e);
+    this.applyPointerGesture(this.mouse.target, p.x - this.mouse.startX, p.y - this.mouse.startY, e.timeStamp);
+  },
+
+  // ---- Touch --------------------------------------------------------------
+  //
+  // Touch mirrors the mouse gesture set exactly (swipe left/right moves,
+  // up/down cycles, double tap hard-drops) but is multi-touch and side-aware:
+  // every finger is tracked by its own Touch.identifier and bound to the well
+  // owning the canvas half it started in, so two Multiplayer players can
+  // swipe and drop simultaneously on one screen without stealing each other's
+  // gestures or double-tap timing.
+  //
+  // TouchLists are indexed rather than iterated — they aren't reliably
+  // iterable across browsers.
+
+  handleTouchStart(e) {
+    e.preventDefault();
+    this.noteTouchActivity(e.timeStamp);
+    for (let i = 0; i < e.changedTouches.length; i++) {
+      const t = e.changedTouches[i];
+      const p = this.eventToCanvas(t);
+      this.touches.set(t.identifier, {
+        target: this.gestureTargetAt(p.x, p.y),
+        startX: p.x,
+        startY: p.y,
+      });
+    }
+  },
+
+  // Gestures resolve on touchend (one action per swipe, same as a mouse
+  // drag); this only exists to keep the page from scrolling/zooming under the
+  // finger, which `touch-action: none` alone doesn't cover everywhere.
+  handleTouchMove(e) {
+    if (this.touches.size > 0) e.preventDefault();
+  },
+
+  handleTouchEnd(e) {
+    e.preventDefault();
+    this.noteTouchActivity(e.timeStamp);
+    for (let i = 0; i < e.changedTouches.length; i++) {
+      const t = e.changedTouches[i];
+      const g = this.touches.get(t.identifier);
+      if (!g) continue;
+      this.touches.delete(t.identifier);
+
+      const p = this.eventToCanvas(t);
+      const dx = p.x - g.startX;
+      const dy = p.y - g.startY;
+
+      if (g.target === 'ui') {
+        // A finger that slid away from where it landed is a cancelled tap,
+        // the same as dragging off a button before releasing the mouse.
+        if (Math.hypot(dx, dy) < INPUT.SWIPE_THRESHOLD_PX) this.dispatchTap(p.x, p.y);
+      } else if (g.target) {
+        this.applyPointerGesture(g.target, dx, dy, e.timeStamp);
+      }
+    }
+  },
+
+  handleTouchCancel(e) {
+    for (let i = 0; i < e.changedTouches.length; i++) {
+      this.touches.delete(e.changedTouches[i].identifier);
+    }
+  },
+
+  // touchstart's preventDefault() already stops the browser's compatibility
+  // mouse events, but a short grace window after any touch guarantees a stray
+  // synthetic click can't activate a menu button a second time.
+  noteTouchActivity(ts) {
+    this._mouseSuppressedUntilTs = ts + INPUT.TOUCH_MOUSE_GRACE_MS;
+  },
+
+  mouseSuppressed(e) {
+    return e.timeStamp < this._mouseSuppressedUntilTs;
+  },
+
+  // Dominant-axis swipe maps to move/cycle, per CLAUDE.md Controls.
   resolveSwipeGesture(well, dx, dy) {
     if (Math.abs(dx) >= Math.abs(dy)) {
       if (dx > 0) PieceLogic.moveRight(well.grid, well.piece);
@@ -336,9 +480,8 @@ const Game = {
     }
   },
 
-  // Title-screen / win-dialog button clicks (Menu owns its own layout and
-  // hit-testing; the win dialog's small button set is handled right here).
-  // Pointer position in the fixed 800x600 logical space.
+  // A mouse event's or Touch's position in the fixed 800x600 logical space —
+  // the only space any hit-testing or gesture math happens in.
   eventToCanvas(e) {
     const rect = this.canvas.getBoundingClientRect();
     return {
@@ -358,8 +501,17 @@ const Game = {
   },
 
   handleCanvasClick(e) {
+    if (this.mouseSuppressed(e)) return;
     const { x, y } = this.eventToCanvas(e);
+    this.dispatchTap(x, y);
+  },
 
+  // A plain click or tap at a logical-space point — title screen, HUD buttons,
+  // and the game-over/win dialogs. Shared by the mouse `click` handler and
+  // touchend's 'ui' target, so both pointer kinds hit exactly the same
+  // targets. Menu owns its own layout and hit-testing; the dialogs' small
+  // button sets are handled right here.
+  dispatchTap(x, y) {
     if (this.screen === 'menu') { Menu.handleClick(x, y); return; }
 
     // HUD icon buttons sit above everything (including dialogs), same

@@ -47,11 +47,18 @@ const SCORE = { TIER_SIZE: 3 };
 // first), N=6 sends 1, N=9 sends 2, N=12 sends 3.
 const GARBAGE = { THRESHOLD: 3, STEP: 3 };
 
-// Mouse/touch gesture tuning — a drag shorter than the threshold is treated
-// as a click/tap instead of a swipe.
+// Mouse/touch gesture tuning. Both pointer kinds run through the same
+// gesture model, so the thresholds are shared and measured in the fixed
+// 800x600 logical space (not raw client pixels) — a drag/swipe shorter than
+// SWIPE_THRESHOLD_PX is treated as a click/tap instead, and two taps within
+// DOUBLE_CLICK_MS hard-drop.
 const INPUT = {
   SWIPE_THRESHOLD_PX: 24,
   DOUBLE_CLICK_MS: 320,
+  // Grace window after any touch during which mouse events are ignored, so a
+  // synthetic click a browser still fires for a tap can't activate a button
+  // twice (touchstart's preventDefault normally suppresses those already).
+  TOUCH_MOUSE_GRACE_MS: 500,
 };
 
 const ANIM = {

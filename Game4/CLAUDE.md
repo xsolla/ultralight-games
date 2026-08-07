@@ -370,9 +370,27 @@ input path (mouse click or touch tap), independent of keyboard bindings.
 move/cycle the piece (dominant axis wins — horizontal drag moves left/right,
 vertical drag cycles up/down), double-click to hard-drop — the same gesture
 mapping as Touch above. Mouse control drives **Single Player's** well, or
-**Player 1's** well in Multiplayer — Player 2 stays keyboard-only
+**Player 1's** well in Multiplayer — Player 2 stays keyboard-and-touch-only
 (arrows/Enter), so one player's mouse can't interfere with the other's well
 on a shared screen.
+
+**Touch:** runs through the same gesture model as the mouse (swipe to
+move/cycle, double tap to hard-drop) and behaves identically — but unlike the
+mouse it is multi-touch and **side-aware**:
+
+- **Single Player:** a touch anywhere on the canvas drives the one well.
+- **Multiplayer:** the canvas splits down the middle, matching the two visual
+  zones the layout already draws — a touch starting left of center drives
+  **Player 1's** well, right of center drives **Player 2's**. Each finger is
+  tracked by its own `Touch.identifier` and resolved independently, and each
+  side keeps its own double-tap timer, so **both players can swipe and drop
+  simultaneously** on one touchscreen without stealing each other's gestures.
+- A gesture is bound to its side the moment it starts, so a swipe still
+  counts for the well it began over even if it ends past the divide.
+- Taps on menus, dialogs and the HUD icon buttons are routed as plain taps
+  rather than piece gestures (so the top-right HUD row, which sits inside
+  Player 2's half, never moves Player 2's piece). A tap that slides off the
+  button it started on is cancelled, like dragging off a button with a mouse.
 
 ## Conventions
 - Use `requestAnimationFrame`, delta-time updates (a `Game.time` accumulator
@@ -432,6 +450,18 @@ on a shared screen.
   - **Input:** full keyboard for both modes, plus mouse drag-to-swipe +
     double-click for Single Player/Player 1, and plain click for all
     menus/dialogs (scoped per Controls).
+  - **Touch:** mouse and touch share one gesture model in `game.js`
+    (`gestureTargetAt` / `applyPointerGesture` / `resolveSwipeGesture`), with
+    both measured in the logical 800×600 space so one `INPUT` threshold pair
+    covers both. Touch is multi-touch and side-aware — fingers are tracked by
+    `Touch.identifier` in `Game.touches` and bound at touchstart to the well
+    owning the canvas half they began in, with a per-target double-tap timer
+    in `Game.lastTapTs`, so both Multiplayer players can play at once on one
+    screen. Menu/dialog/HUD taps route to `dispatchTap` (shared with the
+    mouse `click` path) instead of becoming piece gestures; touchstart
+    `preventDefault()`s to kill scroll/zoom and the synthetic mouse events a
+    tap fires, backed by an `INPUT.TOUCH_MOUSE_GRACE_MS` window so a stray
+    one can't activate a button twice. See Controls → Touch.
   - **HUD redesign:** much darker background/tray across every screen (menu
     included) so saturated tokens read as the brightest thing on screen;
     `js/ambiance.js` implements the previously-planned drifting bokeh
@@ -451,7 +481,6 @@ on a shared screen.
     changes glyph per mode) and an Exit button that returns to the title
     screen immediately.
 - **Pending:** a scoreboard view on the title screen itself
-  (data/persistence exists, just not shown there yet), touch input (mouse
-  gesture code is written to be reused, not yet wired to touch events),
-  other on-screen buttons (move/cycle/drop), and the lock-squash animation
-  noted above.
+  (data/persistence exists, just not shown there yet), on-screen buttons for
+  the 5 piece actions (move/cycle/drop), and the lock-squash animation noted
+  above.
