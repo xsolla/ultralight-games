@@ -4,7 +4,7 @@
 // Single Player and Multiplayer share one "well state" shape (grid, piece,
 // nextPiece, resolve/particles/popups, toppedOut, ...) and the same
 // chain-resolve/gravity-fall state machine — Single Player just drives one
-// of them, Multiplayer drives two independently (see CLAUDE.md Architecture:
+// of them, Multiplayer drives two independently (see claude.md Architecture:
 // "Game simply holds two independent well/piece/score sub-states").
 
 const Game = {
@@ -323,7 +323,7 @@ const Game = {
   // A *mouse* gesture always drives Single Player's well, or Player 1's in
   // Multiplayer, wherever on the canvas it happens — Player 2 is keyboard-
   // and-touch-only, so a shared screen's single mouse can't interfere with
-  // the other player's well (CLAUDE.md Controls).
+  // the other player's well (claude.md Controls).
   mouseGestureTarget() {
     if (this.screen === 'single') return 'sp';
     if (this.screen === 'multiplayer') return 'p1';
@@ -468,7 +468,7 @@ const Game = {
     return e.timeStamp < this._mouseSuppressedUntilTs;
   },
 
-  // Dominant-axis swipe maps to move/cycle, per CLAUDE.md Controls.
+  // Dominant-axis swipe maps to move/cycle, per claude.md Controls.
   resolveSwipeGesture(well, dx, dy) {
     if (Math.abs(dx) >= Math.abs(dy)) {
       if (dx > 0) PieceLogic.moveRight(well.grid, well.piece);
@@ -536,7 +536,7 @@ const Game = {
   // screen. Fixed logical-space layout, same spot in Single Player and
   // Multiplayer since both share the same TOP_MARGIN header strip.
   //
-  // Size/inset/colors/icons match the other three games (Game3/js/render.js is
+  // Size/inset/colors/icons match the other three games (game3/js/render.js is
   // the reference), but the pair stays side by side rather than stacked: this
   // header strip is only TOP_MARGIN (64px) tall, so a second 30px row at y=52
   // would spill onto the well — in Multiplayer directly over P2's top-right
@@ -647,7 +647,7 @@ const Game = {
   // ---------------------------------------------------------------------
   // Chain-resolve state machine — shared by every well in every mode.
   // flash -> explode/particles -> gravity-fall -> rescan, looping until a
-  // rescan comes back empty; see CLAUDE.md Matching, Cascades & Resolution
+  // rescan comes back empty; see claude.md Matching, Cascades & Resolution
   // and Animations.
   // ---------------------------------------------------------------------
 

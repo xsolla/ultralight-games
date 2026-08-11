@@ -1,11 +1,11 @@
 // Xsolla Ultralight Games — portal
 //
 // Discovers game folders in this directory automatically (no manifest to edit):
-//   1. Read the "Title_pictures/" directory listing (works when this site is served
+//   1. Read the "title_pictures/" directory listing (works when this site is served
 //      by anything that returns an autoindex page for a folder with no index.html,
 //      e.g. `python -m http.server`, nginx/Apache autoindex, most static servers).
-//      Each image there ("<GameFolder>.png|jpg|jpeg|webp|gif|svg") names one game.
-//   2. As a supplement, brute-force probe conventional "Game1", "Game2", ... names
+//      Each image there ("<gamefolder>.png|jpg|jpeg|webp|gif|svg") names one game.
+//   2. As a supplement, brute-force probe conventional "game1", "game2", ... names
 //      so new games are still picked up on hosts that don't support autoindex.
 //   3. Every candidate is verified by fetching "<name>/index.html"; the <title> of
 //      that file becomes the card's display name.
@@ -44,11 +44,11 @@ function escapeHtml(str) {
   }[c]));
 }
 
-// Step 1: parse Title_pictures/ directory listing, if the server provides one.
+// Step 1: parse title_pictures/ directory listing, if the server provides one.
 async function listTitlePictures() {
   const map = new Map(); // gameName -> image filename
   try {
-    const res = await fetch('Title_pictures/', { cache: 'no-store' });
+    const res = await fetch('title_pictures/', { cache: 'no-store' });
     if (!res.ok) return map;
     const html = await res.text();
     const doc = new DOMParser().parseFromString(html, 'text/html');
@@ -77,7 +77,7 @@ function probeTitleImage(name) {
       const img = new Image();
       img.onload = () => resolve(`${name}.${ext}`);
       img.onerror = tryNext;
-      img.src = `Title_pictures/${name}.${ext}`;
+      img.src = `title_pictures/${name}.${ext}`;
     };
     tryNext();
   });
@@ -108,11 +108,11 @@ async function discoverGames() {
     candidates.set(name, filename);
   }
 
-  // Supplement with a bounded brute-force scan for the conventional GameN naming,
+  // Supplement with a bounded brute-force scan for the conventional gameN naming,
   // so newly added games still surface even without directory-listing support.
   let misses = 0;
   for (let n = 1; n <= 200 && misses < 8; n++) {
-    const name = `Game${n}`;
+    const name = `game${n}`;
     if (candidates.has(name)) { misses = 0; continue; }
     const info = await checkGame(name);
     if (info) {
@@ -132,7 +132,7 @@ async function discoverGames() {
     games.push({
       name,
       title: info.title,
-      image: filename ? `Title_pictures/${filename}` : null,
+      image: filename ? `title_pictures/${filename}` : null,
     });
   }
 

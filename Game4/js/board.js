@@ -30,7 +30,7 @@ const Board = {
   },
 
   // Multiplayer splits the canvas into two zones (no stats panel — just a
-  // next-piece preview per CLAUDE.md's Multiplayer scope): P1's well sits
+  // next-piece preview per claude.md's Multiplayer scope): P1's well sits
   // toward the left edge with its preview inward toward center, mirrored
   // for P2, so both previews flank the center divide symmetrically.
   computeMultiplayerLayout(canvasW, canvasH) {
@@ -69,7 +69,7 @@ const Board = {
   // Which color IDs are in play for a match. Normally just the first N of
   // COLOR_IDS (order doesn't matter for the generic tilesets) — but the
   // Elements tileset's 6 designs are named, distinct concepts, so at 4/5
-  // variety CLAUDE.md calls for a *random* subset of the six, chosen once
+  // variety claude.md calls for a *random* subset of the six, chosen once
   // per match rather than always the same fixed 4/5.
   pickActiveColors(varietyCount, tilesetId) {
     const n = Math.max(1, Math.min(COLOR_IDS.length, varietyCount || TOKEN_VARIETY.DEFAULT));

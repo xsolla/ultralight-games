@@ -7,7 +7,7 @@
 
 # NOTE: do NOT ignore these — they're meant to be shared with your team:
 #   .claude/settings.json   (shared project permissions/config)
-#   .claude/CLAUDE.md or CLAUDE.md  (project instructions for Claude)
+#   .claude/claude.md or claude.md  (project instructions for Claude)
 #   .claudeignore           (tells Claude which files to skip reading)
 
 # ===== Secrets & environment =====

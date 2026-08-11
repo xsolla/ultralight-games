@@ -40,7 +40,7 @@ Artwork occupies **x 0…169.997, y 4.53857…41.4599** in the source viewBox.
 | Colour | `#80EAFF` |
 | Screen | **Title screen only** — not the in-game header |
 
-`28` is the house margin (`LAYOUT.MARGIN` in Game3) and mirrors the HUD button
+`28` is the house margin (`LAYOUT.MARGIN` in game3) and mirrors the HUD button
 column at `x = 742`, so logo and buttons sit symmetrically.
 
 Check for collisions before committing to it — on every existing title screen the
@@ -407,7 +407,7 @@ comparable reason.
 
 | Game | Deviation | Reason |
 |---|---|---|
-| **Game1** Bubble Bopper | Buttons are DOM, in a column **outside** the frame; fixed 30px, don't scale with the game. Exit ends the run to the score screen rather than the title. | Clicking bubbles is the entire interaction — a button over the field swallows shots. |
-| **Game2** Crowd Run | Buttons are DOM inside the frame. Sound and fullscreen show on the **title screen** too; exit only mid-run. | The frame is a `transform: scale()`-d DOM subtree, so DOM buttons scale with it and sit above the overlay title screen. |
-| **Game3** Hexxagon | Canvas-drawn, gameplay screen only. | **Reference implementation** — match this. |
-| **Game4** Cascadia | Buttons in a **horizontal row** (`x` 670 / 706 / 742, all `y = 16`). | Its header strip is only 64px tall; a second row would overlap the well — in Multiplayer, directly over P2's cells. |
+| **game1** Bubble Bopper | Buttons are DOM, in a column **outside** the frame; fixed 30px, don't scale with the game. Exit ends the run to the score screen rather than the title. | Clicking bubbles is the entire interaction — a button over the field swallows shots. |
+| **game2** Crowd Run | Buttons are DOM inside the frame. Sound and fullscreen show on the **title screen** too; exit only mid-run. | The frame is a `transform: scale()`-d DOM subtree, so DOM buttons scale with it and sit above the overlay title screen. |
+| **game3** Hexxagon | Canvas-drawn, gameplay screen only. | **Reference implementation** — match this. |
+| **game4** Cascadia | Buttons in a **horizontal row** (`x` 670 / 706 / 742, all `y = 16`). | Its header strip is only 64px tall; a second row would overlap the well — in Multiplayer, directly over P2's cells. |

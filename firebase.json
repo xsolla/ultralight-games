@@ -6,7 +6,7 @@
       ".firebaserc",
       "**/.*",
       "**/node_modules/**",
-      "README.md",
+      "readme.md",
       "branding.md"
     ],
     "cleanUrls": true,

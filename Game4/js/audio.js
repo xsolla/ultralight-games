@@ -2,7 +2,7 @@
 // so overlapping triggers of the same event never wait on a previous
 // instance to finish or re-decode) + one looping music element swapped per
 // active tileset. HTMLAudioElement throughout so it works identically under
-// file:// and http:// (see CLAUDE.md Audio). No framework, no Web Audio API.
+// file:// and http:// (see claude.md Audio). No framework, no Web Audio API.
 //
 // Game.loop ticks Sound.update(dt) every frame regardless of screen, so a
 // fade started on returning to the title screen always finishes even though

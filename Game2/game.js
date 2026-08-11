@@ -2157,11 +2157,11 @@ function drawGameOver(ctx) {
 //  AUDIO
 // ═══════════════════════════════════════════════════════════════════
 const SFX_FILES = {
-  clash:        'assets/sfx/Fight_Explosion.mp3',
-  comet:        'assets/sfx/Comet_Sound.mp3',
-  button:       'assets/sfx/Button_Click.mp3',
-  gatePositive: 'assets/sfx/Gate_Positive.mp3',
-  gateNegative: 'assets/sfx/Gate_Negative.mp3',
+  clash:        'assets/sfx/fight_explosion.mp3',
+  comet:        'assets/sfx/comet_sound.mp3',
+  button:       'assets/sfx/button_click.mp3',
+  gatePositive: 'assets/sfx/gate_positive.mp3',
+  gateNegative: 'assets/sfx/gate_negative.mp3',
 };
 
 const Sound = {
@@ -2184,7 +2184,7 @@ const Sound = {
 //      discarded, so any fetch landing later was never decoded.
 // Neither path reported an error, because both swallowed rejections.
 function initAudio() {
-  Sound.bgm = new Audio('assets/bgm/XsollaCrowsdRunnerBGM.mp3');
+  Sound.bgm = new Audio('assets/bgm/xsolla_crowsd_runner_bgm.mp3');
   Sound.bgm.loop   = true;
   Sound.bgm.volume = 0;
 

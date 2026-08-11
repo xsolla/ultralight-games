@@ -55,7 +55,7 @@ html:fullscreen .game-wrapper {
 }
 
 /* HUD icon buttons. Size, radius and colors match the other three games in this
-   repo (Game3/js/render.js is the reference): 30x30, radius 8, 6px gap. Unlike
+   repo (game3/js/render.js is the reference): 30x30, radius 8, 6px gap. Unlike
    those, these sit outside the frame — clicking bubbles is this game's entire
    interaction, so a button painted over the field would eat shots. They stay a
    fixed 30px rather than scaling with the frame: they are page chrome, not part

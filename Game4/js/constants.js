@@ -85,7 +85,7 @@ const AUDIO = {
   MUSIC_VOLUME: 0.45,
   MUSIC_FADE_MS: 3000,
   SFX: {
-    ui_click: 'assets/sfx/uI_click.mp3',
+    ui_click: 'assets/sfx/ui_click.mp3',
     piece_rotate: 'assets/sfx/order_change.mp3',
     piece_lock: 'assets/sfx/tile_stop.mp3',
     match_pop: 'assets/sfx/explosion.mp3',

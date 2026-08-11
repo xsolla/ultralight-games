@@ -91,7 +91,7 @@ const COMPLETE_MESSAGES = {
 // every number here is the same arithmetic the canvas-drawn games use (center
 // 15,15, nominal half-size s=8). Injected from JS rather than written into
 // index.html so that file never contains both an <svg> and a <script> tag, which
-// the mini-app validator flags as XSS (same reason as Game2).
+// the mini-app validator flags as XSS (same reason as game2).
 const MAX_BACKING_SCALE = 2;  // cap on backing-store pixels per logical pixel
 
 const HUD_ICONS = {

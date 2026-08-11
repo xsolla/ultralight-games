@@ -497,7 +497,7 @@ const Renderer = {
   },
 
   // Multiplayer-only chrome: a small caption above each well (stands in for
-  // the stats panel, which Multiplayer intentionally omits — see CLAUDE.md).
+  // the stats panel, which Multiplayer intentionally omits — see claude.md).
   drawWellLabel(ctx, layout) {
     ctx.save();
     ctx.textAlign = 'center';
