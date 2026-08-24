@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
+  <title>Space Interceptor</title>
+  <link rel="stylesheet" href="css/styles.css" />
+</head>
+<body>
+  <!-- Fixed logical resolution 360x640 (9:16); CSS scales the element and
+       resizeCanvas() in game.js rebuilds the backing store at device pixels. -->
+  <canvas id="game" width="360" height="640"></canvas>
+
+  <!-- Load order: constants -> atlas -> data -> pure logic (player, weapons,
+       enemies, spawner, collide, explosions) -> presentation (ambiance,
+       render) -> game. -->
+  <script src="js/constants.js"></script>
+  <script src="js/atlas.js"></script>
+  <script src="js/data.js"></script>
+  <script src="js/player.js"></script>
+  <script src="js/weapons.js"></script>
+  <script src="js/enemies.js"></script>
+  <script src="js/spawner.js"></script>
+  <script src="js/collide.js"></script>
+  <script src="js/explosions.js"></script>
+  <script src="js/ambiance.js"></script>
+  <script src="js/render.js"></script>
+  <script src="js/game.js"></script>
+</body>
+</html>

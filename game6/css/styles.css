@@ -1,0 +1,44 @@
+/* Space Interceptor — canvas scaling & page chrome.
+   The game is authored in a fixed 360x640 logical space, but the canvas backing
+   store is sized to real device pixels (see resizeCanvas() in game.js) so HUD
+   text and vector art stay crisp instead of being upscaled.
+
+   The 540px width cap is deliberate: with devicePixelRatio clamped to 2 in
+   resizeCanvas(), it holds the backing store at or below 1080x1920, i.e. a
+   maximum 3x scale over logical space. The ship sprites are ~141-155px wide in
+   the atlas and render ~46 logical px, so 3x keeps them at roughly 1:1 with
+   their source pixels — past that they would visibly soften. */
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+html, body {
+  width: 100%;
+  height: 100%;
+  background: #05070d;
+  overflow: hidden;
+}
+
+body {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Keep a 9:16 box that fits the viewport (limited by width OR height) and never
+   exceeds 540x960. No object-fit letterboxing — the element IS the 9:16 image,
+   and body's flex centering letterboxes it on other aspect ratios. */
+#game {
+  width: min(100vw, 56.25vh, 540px);
+  aspect-ratio: 9 / 16;
+  max-height: 960px;
+  display: block;
+  /* The ship is steered by dragging; without this, touch drags scroll the page
+     and pointermove events stop arriving mid-gesture. */
+  touch-action: none;
+}
+
+/* Fullscreen uncaps the box; the viewport units above already do the fitting. */
+html:fullscreen #game {
+  width: min(100vw, 56.25vh);
+  max-height: none;
+}
