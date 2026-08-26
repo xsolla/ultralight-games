@@ -109,6 +109,40 @@ const HUD_ARMOR = {
 };
 const HUD_ROW_HULL = 49;   // top of the ship-name caption
 const HUD_TURBO_Y  = 65;   // turbo bar, only present during a burst
+// The turbo strip is SHORTER than the armour bar above it, unlike everything
+// else in this column, because its label has to clear the score readout's left
+// edge at x=218. Turbo is transient and the score is permanent, so turbo yields.
+const HUD_TURBO_W  = 140;
+
+// ---- Score readout ---------------------------------------------------------
+// An ECG, sitting under the button row on the right. It beats once a second,
+// and that beat IS the point being earned for staying alive — render.js reads
+// the phase straight off the same accumulator game.js pays out on, so the two
+// can never drift.
+const HUD_SCORE = {
+  X: 218, Y: 44, W: 132, H: 26,
+  TRACE: 0.60,      // fraction of the width the waveform gets; the number takes
+                    // the rest, so the trace runs INTO the figure it explains
+  POP: 0.22,        // extra scale on the number at the peak of a gain
+  SWEEP: 0.22,      // fraction of the trace lit by the travelling highlight
+};
+
+// One PQRST complex, as (x, y) in a 0..1 box — y 0 is the top, 0.5 the isoline.
+// A polyline rather than curves: at 26px tall the corners of a real ECG are what
+// make it read as one, and smoothing them turns it into a generic squiggle.
+const ECG_TRACE = [
+  [0.00, 0.50], [0.14, 0.50],
+  [0.20, 0.43], [0.26, 0.50],               // P
+  [0.33, 0.57], [0.38, 0.10], [0.44, 0.74], // QRS — the tall one
+  [0.49, 0.50], [0.60, 0.50],
+  [0.68, 0.38], [0.78, 0.50],               // T
+  [1.00, 0.50],
+];
+// Which vertex is the R peak. The sweep is phased so its lit window is centred
+// here at the instant a point lands — that is the whole point of the readout,
+// and without it the highlight reaches the spike at an arbitrary moment and the
+// beat stops meaning anything.
+const ECG_BEAT_VERTEX = 5;
 
 // The scrim the header sits on. The ship can reach y=28 (PLAYFIELD.top) and
 // enemies come through the top edge, so without it the text is read against a
@@ -120,8 +154,8 @@ const HUD_TURBO_Y  = 65;   // turbo bar, only present during a burst
 // left corner sits — so it holds near full strength to HUD_SCRIM_HOLD and only
 // then falls away, which keeps one even wash behind all three rows and puts the
 // whole of the fade below them where nothing has to be read.
-const HUD_SCRIM_HOLD = 58;
-const HUD_SCRIM_H    = 92;
+const HUD_SCRIM_HOLD = 68;
+const HUD_SCRIM_H    = 98;
 
 let bgGradient = null;        // built once; CANVAS_W/H never change
 let hudScrim = null;          // ditto
@@ -722,14 +756,15 @@ function drawHud(ctx, game) {
   if (p.turboMs > 0) {
     const frac = p.turboMs / PLAYER_TURBO_MS;
     ctx.fillStyle = COLORS.turboTrack;
-    ctx.fillRect(HUD_ARMOR.X, HUD_TURBO_Y, HUD_ARMOR.W, 3);
+    ctx.fillRect(HUD_ARMOR.X, HUD_TURBO_Y, HUD_TURBO_W, 3);
     ctx.fillStyle = COLORS.turbo;
-    ctx.fillRect(HUD_ARMOR.X, HUD_TURBO_Y, HUD_ARMOR.W * frac, 3);
+    ctx.fillRect(HUD_ARMOR.X, HUD_TURBO_Y, HUD_TURBO_W * frac, 3);
     ctx.font = `600 9px ${FONT}`;
     ctx.textBaseline = 'middle';
-    ctx.fillText('TURBO', HUD_ARMOR.X + HUD_ARMOR.W + 8, HUD_TURBO_Y + 1.5);
+    ctx.fillText('TURBO', HUD_ARMOR.X + HUD_TURBO_W + 8, HUD_TURBO_Y + 1.5);
   }
 
+  drawScore(ctx, game);
   drawHudButtons(ctx, game);
   drawDifficultyHint(ctx, game);
   drawControlHints(ctx);
@@ -814,6 +849,93 @@ function drawHullCaption(ctx, p) {
 
   ctx.fillStyle = COLORS.hudDim;
   ctx.fillText(' / ' + ship.base * 5, x, HUD_ROW_HULL);
+}
+
+// ---- Score readout ---------------------------------------------------------
+// The trace runs in from the left, beats, and flattens out into the number it
+// is counting. Three passes over one polyline: the resting trace, a bright
+// segment travelling along it once per beat, and the figure itself.
+//
+// A DEAD player flatlines — the complex is dropped, the sweep stops and the line
+// goes to a dim rule. It costs nothing, it is the one readout that can say
+// something about being dead, and a heartbeat still ticking over a wreck would
+// be saying the opposite.
+function drawScore(ctx, game) {
+  const dead = game.player.dead;
+  const traceW = HUD_SCORE.W * HUD_SCORE.TRACE;
+  // Phase of the current beat: 1 the instant a point lands, decaying to 0 just
+  // before the next one. The same counter game.js pays out on.
+  const beat = dead ? 0 : 1 - game.scoreMs / SCORE_TICK_MS;
+
+  const pts = ECG_TRACE.map(([x, y]) => [
+    HUD_SCORE.X + x * traceW,
+    // Flatlined: every point collapses onto the isoline, so the same polyline
+    // draws both states and there is no second path to keep in sync.
+    HUD_SCORE.Y + (dead ? 0.5 : y) * HUD_SCORE.H,
+  ]);
+
+  ctx.save();
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+
+  const path = () => {
+    ctx.beginPath();
+    ctx.moveTo(pts[0][0], pts[0][1]);
+    for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i][0], pts[i][1]);
+  };
+
+  // 1. the resting trace
+  ctx.strokeStyle = dead ? COLORS.scoreFlat : COLORS.scoreTrace;
+  ctx.lineWidth = 1.4;
+  path();
+  ctx.stroke();
+
+  // 2. the beat, as a bright segment travelling the polyline. A dash pattern
+  // rather than a partial re-draw: one gap-and-dash cycle the length of the
+  // whole path means exactly one lit segment exists, and moving lineDashOffset
+  // walks it from end to end.
+  if (!dead) {
+    // Arc length, and how far along it the R peak sits. Measured because
+    // lineDashOffset counts in PATH units, not in x — the spike's rise is 12px
+    // of length across 4px of width, so the two are different quantities.
+    // (For this particular trace they happen to agree to within half a pixel,
+    // the extra length before the peak cancelling the extra length after it.
+    // That is a coincidence of this shape, not something to lean on: reshape
+    // ECG_TRACE and the measurement stays right where an x fraction would not.)
+    let len = 0, atBeat = 0;
+    for (let i = 1; i < pts.length; i++) {
+      len += Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]);
+      if (i === ECG_BEAT_VERTEX) atBeat = len;
+    }
+    const lit = len * HUD_SCORE.SWEEP;
+    // One dash and one gap spanning the whole path, so exactly one lit segment
+    // can be on the trace at a time and moving the offset walks it end to end.
+    const period = len + lit;
+    ctx.setLineDash([lit, len]);
+    // Start of the lit window, advanced by a full period across the second and
+    // pinned so that at beat = 1 it straddles the R peak.
+    const start = atBeat - lit / 2 + (1 - beat) * period;
+    ctx.lineDashOffset = -start;
+    ctx.strokeStyle = COLORS.score;
+    ctx.lineWidth = 1.9;
+    path();
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
+
+  // 3. the figure, right-aligned so it grows leftward into the space the trace
+  // leaves rather than pushing the widget off the edge at five digits.
+  const pop = game.scorePopMs / SCORE_POP_MS;
+  const scale = 1 + HUD_SCORE.POP * pop * pop;
+  const cy = HUD_SCORE.Y + HUD_SCORE.H * 0.5;
+  ctx.translate(HUD_SCORE.X + HUD_SCORE.W, cy);
+  ctx.scale(scale, scale);
+  ctx.font = `700 15px ${FONT}`;
+  ctx.textAlign = 'right';
+  ctx.textBaseline = 'middle';
+  ctx.fillStyle = dead ? COLORS.hudDim : COLORS.score;
+  ctx.fillText(String(game.score), 0, 0);
+  ctx.restore();
 }
 
 // ---- HUD buttons -----------------------------------------------------------

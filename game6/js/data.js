@@ -251,8 +251,11 @@ const ARROW_HOLD_BOTTOM = 0.90;
 // in the game at exactly one hit — it exists to be read, not tuned.
 // `tier` gates the difficulty ramp: tier 0 types spawn from the first second,
 // higher tiers unlock as the run progresses (see spawner.js).
-// `score` and `drop` are carried but unwired until scoring and bonuses land,
-// exactly as SHIPS.base and WEAPONS.damage were before their systems arrived.
+// `score` is what killing one is worth. Flat 1 for the tumbling types and 3 for
+// the armed ones, matching the rule that a shooting enemy is worth three times
+// an unarmed one — kept as a per-type FIELD rather than derived from `shoots` so
+// a single type can be re-priced later without the rule becoming an `if`.
+// `drop` is its per-kill bonus chance, scaled by DIFFICULTIES.dropMult.
 //
 // `color`/`spark` are the row's hull colours and drive its death explosion, so
 // a kill reads as that specific enemy coming apart. MEASURED the same way the
@@ -267,33 +270,33 @@ const ENEMY_TYPES = [
   // Cheap and slow. The type the player learns the collision rules against.
   { key: 'sentinel', name: 'Sentinel', atlas: 'aliens', row: 0, shoots: false,
     hp: 2, speed: 72, contact: 1, dispW: 40, spin: 40, frameMs: 90,
-    tier: 0, score: 100, drop: 0.05,
+    tier: 0, score: 1, drop: 0.05,
     color: '70, 187, 207', spark: '92, 183, 134' },    // teal + green
 
   // Slow but genuinely tough — meant to be dodged early and killed later.
   { key: 'warden', name: 'Warden', atlas: 'aliens', row: 1, shoots: false,
     hp: 4, speed: 58, contact: 1, dispW: 44, spin: -30, frameMs: 110,
-    tier: 1, score: 200, drop: 0.10,
+    tier: 1, score: 1, drop: 0.10,
     color: '50, 138, 205', spark: '97, 203, 193' },    // blue + pale cyan
 
   // Fast and fragile, spins hard. The one that actually catches a careless
   // player, so it stays cheap to kill.
   { key: 'lancer', name: 'Lancer', atlas: 'aliens', row: 2, shoots: false,
     hp: 2, speed: 132, contact: 1, dispW: 38, spin: 200, frameMs: 70,
-    tier: 1, score: 150, drop: 0.08,
+    tier: 1, score: 1, drop: 0.08,
     color: '198, 45, 38', spark: '251, 201, 95' },     // red + gold
 
   // The wall. Slowest and largest, and the only type a level-1 weapon cannot
   // clear before it arrives.
   { key: 'bulwark', name: 'Bulwark', atlas: 'aliens', row: 3, shoots: false,
     hp: 7, speed: 46, contact: 1, dispW: 48, spin: 25, frameMs: 120,
-    tier: 2, score: 350, drop: 0.16,
+    tier: 2, score: 1, drop: 0.16,
     color: '210, 112, 35', spark: '254, 241, 130' },   // orange + yellow
 
   // Mid-weight, quick, and the type the spawner prefers for weaving paths.
   { key: 'phantom', name: 'Phantom', atlas: 'aliens', row: 4, shoots: false,
     hp: 3, speed: 96, contact: 1, dispW: 40, spin: -140, frameMs: 80,
-    tier: 2, score: 250, drop: 0.12,
+    tier: 2, score: 1, drop: 0.12,
     color: '196, 46, 185', spark: '228, 161, 223' },   // magenta + lightened
 
   // ---- Armed types (alien_shoot_atlas.png) ---------------------------------
@@ -332,7 +335,7 @@ const ENEMY_TYPES = [
   { key: 'marauder', name: 'Marauder', atlas: 'shooters', row: 0, shoots: true,
     hp: 3, speed: 108, contact: 1, dispW: 40, spin: 0, frameMs: 95,
     disc: 0.78, face: 'fixed', path: 'shooterRun',
-    tier: 0, score: 300, drop: 0.14,
+    tier: 0, score: 3, drop: 0.14,
     gun: { weapon: 2, count: 2, aim: 'ahead', intervalMs: 820 },
     // Cluster 2 (pale cyan) is far brighter than cluster 1 (indigo), which is
     // what a fireball wants: `color` cools the fireball's mid-stop and `spark`
@@ -346,7 +349,7 @@ const ENEMY_TYPES = [
   { key: 'harrier', name: 'Harrier', atlas: 'shooters', row: 1, shoots: true,
     hp: 3, speed: 165, contact: 1, dispW: 38, spin: 0, frameMs: 80,
     disc: 0.47, face: 'fixed', path: 'shooterArrow',
-    tier: 0, score: 260, drop: 0.12,
+    tier: 0, score: 3, drop: 0.12,
     gun: { weapon: 1, count: 1, aim: 'ahead', intervalMs: 300,
            fireFrom: ARROW_IN_MS + 140, volleys: 3 },
     // The second-strongest cluster here was another green — a shade of the
@@ -361,7 +364,7 @@ const ENEMY_TYPES = [
   { key: 'reaver', name: 'Reaver', atlas: 'shooters', row: 2, shoots: true,
     hp: 2, speed: 92, contact: 1, dispW: 36, spin: 0, frameMs: 85,
     disc: 0.60, face: 'travel', path: 'shooterCurve',
-    tier: 0, score: 200, drop: 0.07,
+    tier: 0, score: 3, drop: 0.07,
     gun: { weapon: 0, count: 1, aim: 'player', intervalMs: 1000 },
     // Single-hued art, like Phantom: the spark is that hue lightened 55% toward
     // white, the same figure measured off Phantom's own two clusters.
@@ -373,7 +376,7 @@ const ENEMY_TYPES = [
   { key: 'stalker', name: 'Stalker', atlas: 'shooters', row: 3, shoots: true,
     hp: 4, speed: 132, contact: 1, dispW: 42, spin: 0, frameMs: 90,
     disc: 0.62, face: 'steer', path: 'homing', steer: true,
-    tier: 0, score: 450, drop: 0.22,
+    tier: 0, score: 3, drop: 0.22,
     gun: { weapon: 3, count: 1, aim: 'ahead', intervalMs: 1000 },
     color: '34, 74, 129', spark: '121, 238, 248' },    // deep blue + cyan
 
@@ -384,7 +387,7 @@ const ENEMY_TYPES = [
   { key: 'corsair', name: 'Corsair', atlas: 'shooters', row: 4, shoots: true,
     hp: 3, speed: 128, contact: 1, dispW: 40, spin: 0, frameMs: 88,
     disc: 0.65, face: 'fixed', path: 'shooterCross',
-    tier: 0, score: 300, drop: 0.15,
+    tier: 0, score: 3, drop: 0.15,
     gun: { weapon: 4, count: 1, aim: 'split', intervalMs: 1000 },
     color: '145, 52, 58', spark: '253, 245, 178' },    // red + pale yellow
 ];

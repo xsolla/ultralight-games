@@ -39,6 +39,13 @@ const COLORS = {
   turbo: '#ffd166',
   turboTrack: 'rgba(255, 209, 102, 0.18)',
 
+  // The score readout is an ECG, so it is monitor-green — and a green nothing
+  // else in the HUD uses, because the trace has to read as a separate
+  // instrument from the armour bar it sits beside.
+  score: '#8ef2c8',
+  scoreTrace: 'rgba(142, 242, 200, 0.30)',   // the trace at rest, between beats
+  scoreFlat: 'rgba(142, 242, 200, 0.18)',    // ...and flatlined, once dead
+
   armor: '#7fd4ff',                        // a banked, fully intact armour layer
   armorLive: '#ffb347',                    // the layer currently being chewed through
   armorTrack: 'rgba(127, 212, 255, 0.15)', // a spent hit inside a slot

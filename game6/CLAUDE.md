@@ -266,6 +266,11 @@ how permanent they are:
 | 3 | `SHIP · hits / max`, 10px | A caption under the bar it explains |
 | — | Turbo, only during a burst | Slotted under the bar so the two read as one instrument stack |
 
+The **score ECG** sits opposite them, under the button row on the right (§7). The
+turbo strip is the one element in the left column that is *not* the armour bar's
+width: its label has to clear the readout's left edge, and turbo is transient
+where the score is permanent, so turbo yields.
+
 **The armour bar shows hull capacity, not just armour.** Five cells are the five weapon
 levels; the *segments inside a cell* are that ship's `base`, so the same bar is 3-up,
 4-up or 5-up depending on what is being flown, and a mid-run ship swap visibly
@@ -639,8 +644,37 @@ up flying a wall of escorts.
 
 ### Scoring and persistence
 
-Score = kills (per-enemy point values) + distance travelled (accumulated scroll,
-divided down by a constant). Shown live in the HUD.
+Score is **survival plus kills**:
+
+| Source | Points |
+|---|---|
+| Each second alive | 1 |
+| Each non-shooting enemy destroyed | 1 |
+| Each shooting enemy destroyed | 3 |
+
+Kill values are a per-type `score` field in `ENEMY_TYPES`, not derived from
+`shoots` — flat 1 and 3 today, so a single type can be re-priced later without the
+rule becoming an `if`. Ramming scores too: the enemy is destroyed, and the armour
+layer it cost is its own price. Every gain goes through `Game.addScore` so the
+readout's pop cannot be forgotten by a future source of points, the same way
+`onPlayerHit` funnels damage.
+
+This replaces the original "kills + distance travelled" idea. Survival time is a
+cleaner second axis than accumulated scroll — it is the same quantity the player
+can already feel, and it needs no divisor constant to be legible.
+
+**The HUD readout is an ECG**, under the button row on the right. It beats once a
+second, and that beat *is* the point being earned: `render.js` reads the sweep's
+phase straight off `Game.scoreMs`, the same accumulator `game.js` pays out on, so
+the two cannot drift. The bright segment is a `lineDash` window walked along the
+polyline with `lineDashOffset`, phased so it straddles the R peak at the instant
+the point lands — which is why the arc length is measured rather than taken from
+the x coordinates: `lineDashOffset` counts in path units.
+
+A **dead pilot flatlines**. Every vertex collapses onto the isoline, the sweep
+stops and the figure goes dim, so one polyline draws both states. It costs
+nothing, and a heartbeat still ticking over a wreck would be saying the opposite
+of what happened.
 
 High scores live in `js/scores.js` behind a `Scores` namespace, kept in `localStorage`
 under a single namespaced key (`spaceshooter_scores`), **separately per difficulty**,
@@ -735,9 +769,6 @@ Not yet settled — ask rather than assuming:
 
   The `intercept` path is still there and still aims once, at spawn. The two now
   contrast deliberately: `intercept` is dodged *before* it commits, the Stalker after.
-- **Scoring.** `ENEMY_TYPES.score` and the kill count returned by `resolveBulletHits`
-  are both in place, but nothing is wired to a score yet.
-
 - **The nuke.** The last bonus in §7 with no implementation. When it lands it should
   STAGGER its kills rather than raise `EXPLOSION_MAX`: 90 bursts in one frame would be
   dropped straight back out by `pushBurst`, and a screen clearing in a ripple looks

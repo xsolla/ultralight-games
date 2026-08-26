@@ -16,6 +16,15 @@ const DT_CLAMP_MS = 100;    // a backgrounded tab must not teleport the ship
 // the explosion chain in explosions.js, so the restart never cuts it off.
 const RESPAWN_MS  = 2100;
 
+// ---- Scoring ---------------------------------------------------------------
+// One point per second survived. The HUD's ECG beats on this same accumulator,
+// so the heartbeat the player watches IS the point being earned — the readout
+// is not decorating the score, it is showing it.
+const SCORE_TICK_MS = 1000;
+// How long the number stays enlarged after a gain, so a kill registers on a
+// readout that is otherwise only moving once a second.
+const SCORE_POP_MS = 260;
+
 // ---- Screen shake ----------------------------------------------------------
 // Magnitudes are peak displacement in logical px on a 360x640 field, so 5 is
 // about 1.4% of the width — enough to feel like a blow landing, small enough
@@ -77,6 +86,12 @@ const Game = {
   pickups: [],          // drifting bonus bubbles waiting to be caught
   wingmen: [],          // the escort, while a wing bonus is running
   explosions: [],       // live death bursts, purely decorative
+  score: 0,             // this run's points
+  // Counts UP toward SCORE_TICK_MS and wraps. Kept rather than derived from
+  // runMs because it has to stop dead when the player does, and because the ECG
+  // reads its phase straight off it.
+  scoreMs: 0,
+  scorePopMs: 0,        // counts down; drives the number's pop on a gain
   runMs: 0,             // elapsed run time — the difficulty ramp's only input
   deathMs: 0,           // time since the ship was wrecked; drives the restart
   // Screen shake. `shakeTotalMs` is kept alongside the countdown so the decay
@@ -143,6 +158,9 @@ const Game = {
     this.pickups.length = 0;
     this.wingmen.length = 0;
     this.explosions.length = 0;
+    this.score = 0;
+    this.scoreMs = 0;
+    this.scorePopMs = 0;
     this.runMs = 0;
     this.deathMs = 0;
     this.shakeMs = 0;
@@ -258,6 +276,14 @@ const Game = {
       this.hudCapture = false;
       this.hudHover = null;
     });
+  },
+
+  // ---- Scoring ------------------------------------------------------------
+  // Every gain goes through here so the readout's pop can never be forgotten by
+  // a new source of points — the same reason onPlayerHit exists for damage.
+  addScore(n) {
+    this.score += n;
+    this.scorePopMs = SCORE_POP_MS;
   },
 
   // ---- Bonuses ------------------------------------------------------------
@@ -424,6 +450,7 @@ const Game = {
     for (const e of resolveBulletHits(this.bullets, this.enemies, dt)) {
       explodeEnemy(this.explosions, e);
       maybeDropBonus(this.pickups, e, diff);
+      this.addScore(ENEMY_TYPES[e.t].score);
     }
     // Incoming fire leaves no wreck to explode, but it does leave a mark on the
     // hull, in the colour of the particle that made it. Death is picked up by
@@ -437,8 +464,10 @@ const Game = {
     const rammed = resolvePlayerHits(this.player, this.enemies);
     if (rammed) {
       explodeEnemy(this.explosions, rammed);
-      // A ram kills the enemy too, so it drops like any other death.
+      // A ram kills the enemy too, so it drops and scores like any other death.
+      // It cost an armour layer to get, which is its own price.
       maybeDropBonus(this.pickups, rammed, diff);
+      this.addScore(ENEMY_TYPES[rammed.t].score);
       // The impact takes the rammer's colours, so a kill and a hit go off
       // together in the same hue and read as one collision rather than two
       // unrelated events.
@@ -456,6 +485,17 @@ const Game = {
     this.updateDeath(dt);
     updateExplosions(this.explosions, dt);
 
+    // One point per second, but only while there is someone alive to earn it —
+    // and a WHILE, not an if, so a long frame pays out every tick that fell
+    // inside it rather than swallowing the extras.
+    if (!this.player.dead) {
+      this.scoreMs += dt;
+      while (this.scoreMs >= SCORE_TICK_MS) {
+        this.scoreMs -= SCORE_TICK_MS;
+        this.addScore(1);
+      }
+    }
+    this.scorePopMs = Math.max(0, this.scorePopMs - dt);
     this.shakeMs = Math.max(0, this.shakeMs - dt);
 
     // Ease the starfield toward the turbo speed rather than snapping — the ramp
