@@ -5,8 +5,8 @@
 //
 // Iteration 2 scope: starfield, one steerable ship, ship cycling, the turbo
 // burst, and the five player weapons with the §7 armour counter driving their
-// level. Enemies, collision and explosions have since landed; pickups and
-// scoring have not.
+// level. Enemies, collision, explosions and the five armed enemy types have
+// since landed; pickups and scoring have not.
 // ============================================================================
 
 // ---- Tunable ---------------------------------------------------------------
@@ -16,6 +16,50 @@ const DT_CLAMP_MS = 100;    // a backgrounded tab must not teleport the ship
 // the explosion chain in explosions.js, so the restart never cuts it off.
 const RESPAWN_MS  = 2100;
 
+// ---- Screen shake ----------------------------------------------------------
+// Magnitudes are peak displacement in logical px on a 360x640 field, so 5 is
+// about 1.4% of the width — enough to feel like a blow landing, small enough
+// that the ship never leaves the finger that is steering it. Durations are
+// short on purpose: a shake that outlasts the flash it accompanies stops being
+// an impact and becomes a rumble.
+const SHAKE_HIT_MS    = 260;
+const SHAKE_HIT_MAG   = 5;
+// Death gets roughly double both, because it is the one impact the player is
+// not expected to keep playing through.
+const SHAKE_DEATH_MS  = 620;
+const SHAKE_DEATH_MAG = 10;
+
+// ---- What a caught bonus does ----------------------------------------------
+// One entry per BONUSES.kind. It lives here rather than in pickups.js because
+// every one of these reaches into a different subsystem — the armour counter,
+// the wing, the explosion list — and this file is the only one allowed to know
+// about all of them. Same division as the collision resolvers: they report, the
+// loop acts.
+//
+// `arg` is the index rolled when the bubble spawned, so the effect is exactly
+// the one the player could see inside it. A new bonus is a row in BONUSES plus
+// an entry here, never a branch in the update loop.
+const BONUS_EFFECTS = {
+  heal: (game) => healPlayer(game.player),
+
+  // The trap. Routed through the ordinary damage path rather than by editing
+  // `hits` directly, so it gets the same flash, the same shake and the same
+  // grace period as being shot — and so it is ABSORBED during that grace, like
+  // every other damage source. A trap that ignored invulnerability would punish
+  // one mistake twice.
+  harm: (game, arg, row) => {
+    if (game.player.invulnMs > 0) return;
+    damagePlayer(game.player);
+    game.player.invulnMs = PLAYER_INVULN_MS;
+    game.onPlayerHit(row.color, row.spark);
+  },
+
+  weapon: (game, arg) => setWeapon(game.player, arg),
+  ship:   (game, arg) => setShip(game.player, arg),
+  turbo:  (game) => startTurbo(game.player),
+  wing:   (game) => spawnWingmen(game.wingmen, game.player),
+};
+
 const Game = {
   canvas: null,
   ctx: null,
@@ -24,12 +68,35 @@ const Game = {
   player: null,
   scrollMult: 1,        // eased starfield speed multiplier
   bullets: [],          // live player projectiles
-  enemies: [],          // live enemies
+  // Incoming fire, on its own array. Two lists rather than one flagged list
+  // because every consumer wants exactly one of them: player shots are tested
+  // against enemies, enemy shots against the ship, and neither ever against the
+  // other. Filtering one array per test would cost more than keeping two.
+  enemyBullets: [],
+  enemies: [],          // live enemies, armed and unarmed alike
+  pickups: [],          // drifting bonus bubbles waiting to be caught
+  wingmen: [],          // the escort, while a wing bonus is running
   explosions: [],       // live death bursts, purely decorative
   runMs: 0,             // elapsed run time — the difficulty ramp's only input
   deathMs: 0,           // time since the ship was wrecked; drives the restart
+  // Screen shake. `shakeTotalMs` is kept alongside the countdown so the decay
+  // curve is a fraction of THIS shake's own length rather than of a constant —
+  // otherwise the long death shake and the short hit shake could not share one
+  // easing function.
+  shakeMs: 0,
+  shakeTotalMs: 0,
+  shakeMag: 0,
   diffIdx: 1,           // index into DIFFICULTIES; 'normal' until menu.js exists
-  spawn: { trickleMs: 0, waveMs: 0 },   // spawner timers (it holds no state)
+  // Spawner timers — one per stream. It holds no state of its own.
+  spawn: { trickleMs: 0, waveMs: 0, shooterMs: 0 },
+
+  // ---- HUD ----
+  soundState: 'on',     // 'on' | 'musicoff' | 'off'; see SOUND_CYCLE
+  hudHover: null,       // id of the button under the pointer, or null
+  // True from a pointerdown that landed on a button until it is released. While
+  // it is set the ship does not follow the pointer at all, so dragging off a
+  // button cannot fling the ship into the corner behind it.
+  hudCapture: false,
 
   // Input state, read once per frame by updatePlayer().
   pointer: { x: CANVAS_W / 2, y: CANVAS_H / 2, active: false },
@@ -71,10 +138,16 @@ const Game = {
   resetRun(shipIdx) {
     this.player = createPlayer(shipIdx);
     this.bullets.length = 0;
+    this.enemyBullets.length = 0;
     this.enemies.length = 0;
+    this.pickups.length = 0;
+    this.wingmen.length = 0;
     this.explosions.length = 0;
     this.runMs = 0;
     this.deathMs = 0;
+    this.shakeMs = 0;
+    this.shakeTotalMs = 0;
+    this.shakeMag = 0;
     this.scrollMult = 1;
     resetSpawner(this.spawn);
   },
@@ -104,26 +177,49 @@ const Game = {
     // bare cursor with no button held, which keeps LMB free for the ship swap.
     this.canvas.addEventListener('pointermove', (e) => {
       const p = this.toLogical(e);
+      this.noteInputKind(e);
+      const over = hudButtonAt(p.x, p.y);
+      this.hudHover = over;
+      this.canvas.style.cursor = over ? 'pointer' : 'default';
+      // The top corners belong to the HUD. A bare cursor resting on a button
+      // must not drag the ship up there to meet it, and a drag that STARTED on
+      // a button must not steer at all — both are the same rule, and both are
+      // the §5 requirement that a button never swallows the ship's input read
+      // from the other side.
+      if (this.hudCapture || over) return;
       this.pointer.x = p.x;
       this.pointer.y = p.y;
       this.pointer.active = true;
-      this.noteInputKind(e);
     });
     this.canvas.addEventListener('pointerleave', () => {
       this.pointer.active = false;
       this.pointerDown = false;
+      this.hudHover = null;
+      this.hudCapture = false;
     });
 
     this.canvas.addEventListener('pointerdown', (e) => {
       const p = this.toLogical(e);
+      this.noteInputKind(e);
+
+      // HUD FIRST, always (CLAUDE.md §5). The buttons sit over the playfield, so
+      // a tap that hits one must not also steer or fire — hence the early
+      // return rather than a flag checked later.
+      const hit = hudButtonAt(p.x, p.y);
+      if (hit) {
+        this.hudCapture = true;
+        this.hudHover = hit;
+        this.pressHudButton(hit);
+        return;
+      }
+
       this.pointer.x = p.x;
       this.pointer.y = p.y;
       this.pointer.active = true;
-      this.noteInputKind(e);
       // LMB is the trigger (§8). Holding it is all autofire is.
       if (e.button === 0) this.pointerDown = true;
     });
-    const release = () => { this.pointerDown = false; };
+    const release = () => { this.pointerDown = false; this.hudCapture = false; };
     this.canvas.addEventListener('pointerup', release);
     this.canvas.addEventListener('pointercancel', release);
 
@@ -139,7 +235,7 @@ const Game = {
       if (k === 'z') cycleShip(this.player);
       if (k === 'x') startTurbo(this.player);
       if (k === 'q') cycleWeapon(this.player);
-      if (k === '[') damagePlayer(this.player);
+      if (k === '[') this.debugDamage();
       if (k === ']') healPlayer(this.player);
       // Difficulty belongs on the title screen; 1/2/3 stand in until menu.js.
       if (k >= '1' && k <= '3') this.diffIdx = +k - 1;
@@ -159,7 +255,92 @@ const Game = {
     window.addEventListener('blur', () => {
       this.keys.clear();
       this.pointerDown = false;
+      this.hudCapture = false;
+      this.hudHover = null;
     });
+  },
+
+  // ---- Bonuses ------------------------------------------------------------
+  applyBonus(b) {
+    const row = BONUSES[b.t];
+    BONUS_EFFECTS[row.kind](this, b.arg, row);
+  },
+
+  // ---- Feedback -----------------------------------------------------------
+  // Every way the player can be hurt funnels through here, so the flash and the
+  // shake can never drift apart or be forgotten by a new damage source. Colours
+  // are the SOURCE's; pass null when the source has none and explodeImpact
+  // picks one (CLAUDE.md §7).
+  //
+  // Deliberately NOT inside damagePlayer: that is a pure function over the
+  // counter in player.js, and spawning effects from it would put presentation
+  // inside the armour model.
+  onPlayerHit(color, spark) {
+    explodeImpact(this.explosions, this.player.x, this.player.y, color, spark);
+    this.shake(SHAKE_HIT_MS, SHAKE_HIT_MAG);
+  },
+
+  // Start a shake, unless a bigger one is already running. Bigger WINS OUTRIGHT
+  // rather than adding: two hits in quick succession must not stack into
+  // something that throws the playfield around, but a death landing on top of a
+  // graze must not be damped down to the graze either.
+  shake(ms, mag) {
+    if (this.shakeMs > 0 && mag < this.shakeMag) return;
+    this.shakeMs = ms;
+    this.shakeTotalMs = ms;
+    this.shakeMag = mag;
+  },
+
+  // ---- HUD ----------------------------------------------------------------
+  // One press. Kept here rather than in render.js because every one of these is
+  // a state transition, and render.js does not mutate state.
+  pressHudButton(id) {
+    if (id === 'sound') this.soundState = SOUND_CYCLE[this.soundState];
+    else if (id === 'exit') this.endRun();
+    else this.toggleFullscreen();
+  },
+
+  // branding.md §2 says exit returns to the title screen. There is no title
+  // screen yet (CLAUDE.md §10), so this ends the run instead — the way game1's
+  // exit does, and through the wreck rather than around it, so the button
+  // produces feedback the player has already been taught to read. Rewire it to
+  // the title when menu.js lands; nothing else here has to change.
+  endRun() {
+    if (this.player.dead || this.player.hits <= 0) return;
+    this.player.hits = 0;
+  },
+
+  // Read live rather than tracked, so leaving by Esc or F11 keeps the glyph in
+  // sync for free (branding.md §4).
+  isFullscreen() {
+    return !!(document.fullscreenElement || document.webkitFullscreenElement);
+  },
+
+  // Targets <html>, NOT the canvas: the UA stylesheet forces a fullscreen
+  // element to 100% width and height, which would break the 9:16 CSS box in
+  // styles.css that does all of this game's fitting. Fullscreening the root
+  // makes the VIEWPORT the screen instead and leaves that box untouched.
+  toggleFullscreen() {
+    if (this.isFullscreen()) {
+      const exit = document.exitFullscreen || document.webkitExitFullscreen;
+      if (exit) { const r = exit.call(document); if (r && r.catch) r.catch(() => {}); }
+      return;
+    }
+    const el = document.documentElement;
+    const req = el.requestFullscreen || el.webkitRequestFullscreen;
+    // Rejects when an embedding page withholds allow="fullscreen" (§5), so the
+    // button is simply inert there rather than throwing.
+    if (req) { const r = req.call(el); if (r && r.catch) r.catch(() => {}); }
+  },
+
+  // Scaffolding, and the one damage source in the game with no colour of its
+  // own — which makes it the thing that exercises explodeImpact's random pick.
+  // Goes with the rest of the debug keys.
+  debugDamage() {
+    if (this.player.dead) return;
+    const before = this.player.hits;
+    damagePlayer(this.player);
+    if (this.player.hits < before) this.onPlayerHit(null, null);
   },
 
   // A pointer event's type decides whether the player needs a fire button.
@@ -216,25 +397,66 @@ const Game = {
       updatePlayer(this.player, dt, this.readInput());
       updateWeapon(this.player, dt, this.isFiring(), this.bullets);
     }
-    updateBullets(this.bullets, dt);
+    // The wing flies formation on wherever the ship just went, and shoots on the
+    // player's own trigger — so it follows the same move-then-fire ordering.
+    updateWingmen(this.wingmen, dt, this.player, this.isFiring(), this.bullets);
 
     updateSpawner(this.spawn, dt, this.runMs, diff, this.player.x, this.enemies);
     updateEnemies(this.enemies, dt);
+    // Enemy guns run after their hulls have moved, for the same reason the
+    // player's does above. This also steers the one type that steers, which is
+    // why it comes after updateEnemies rather than before: that call is what
+    // ages and culls the entity, and this one is what moves this one kind.
+    updateShooters(this.enemies, dt, this.player, this.enemyBullets, diff);
+
+    // Both projectile lists move here, after everything that could have added
+    // to them this frame — so a shot fired this frame has already travelled
+    // when the hit tests below reconstruct where it came from.
+    updateBullets(this.bullets, dt);
+    updateBullets(this.enemyBullets, dt);
 
     // Resolve after everything has moved, so both sides of a test agree on the
-    // frame. resolveBulletHits reconstructs each bullet's pre-move position
-    // from the same dt, so it must run in the frame that moved them.
+    // frame. Both bullet resolvers reconstruct each shot's pre-move position
+    // from the same dt, so they must run in the frame that moved them.
     //
     // Collision only reports what died; turning that into effects is this
     // loop's job, which is what keeps collide.js free of spawning.
     for (const e of resolveBulletHits(this.bullets, this.enemies, dt)) {
       explodeEnemy(this.explosions, e);
+      maybeDropBonus(this.pickups, e, diff);
     }
+    // Incoming fire leaves no wreck to explode, but it does leave a mark on the
+    // hull, in the colour of the particle that made it. Death is picked up by
+    // updateDeath below like every other damage source.
+    const shot = resolveEnemyBulletHits(this.player, this.enemyBullets, dt);
+    if (shot) {
+      const c = PARTICLE_COLORS[bulletWeapon(shot).row];
+      this.onPlayerHit(c.color, c.spark);
+    }
+
     const rammed = resolvePlayerHits(this.player, this.enemies);
-    if (rammed) explodeEnemy(this.explosions, rammed);
+    if (rammed) {
+      explodeEnemy(this.explosions, rammed);
+      // A ram kills the enemy too, so it drops like any other death.
+      maybeDropBonus(this.pickups, rammed, diff);
+      // The impact takes the rammer's colours, so a kill and a hit go off
+      // together in the same hue and read as one collision rather than two
+      // unrelated events.
+      const t = ENEMY_TYPES[rammed.t];
+      this.onPlayerHit(t.color, t.spark);
+    }
+
+    // Bonuses drift and are collected after all damage has resolved, so a heal
+    // caught in the same frame as a hit lands on the counter the hit left.
+    updatePickups(this.pickups, dt);
+    for (const b of resolveCatches(this.player, this.pickups)) {
+      this.applyBonus(b);
+    }
 
     this.updateDeath(dt);
     updateExplosions(this.explosions, dt);
+
+    this.shakeMs = Math.max(0, this.shakeMs - dt);
 
     // Ease the starfield toward the turbo speed rather than snapping — the ramp
     // is most of what sells the burst.
@@ -245,10 +467,11 @@ const Game = {
 
   // Out of armour is out of the run (CLAUDE.md §7). Checked here once a frame
   // rather than inside damagePlayer so that every damage source — enemy bodies,
-  // the debug key, and enemy fire when it lands — reaches death the same way.
+  // enemy fire, and the debug key — reaches death the same way.
   updateDeath(dt) {
     if (this.player.hits <= 0 && killPlayer(this.player)) {
       explodeShip(this.explosions, this.player);
+      this.shake(SHAKE_DEATH_MS, SHAKE_DEATH_MAG);
     }
     if (!this.player.dead) return;
 

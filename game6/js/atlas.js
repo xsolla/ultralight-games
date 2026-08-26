@@ -2,20 +2,25 @@
 // atlas.js — sprite atlas loading and blitting. Owns the frame manifests and
 // nothing else: no game state, no gameplay decisions.
 //
-// Both atlases are 1024x1024, 32-bit with real (straight, NOT premultiplied)
-// alpha, so neither needs a chroma-key pass nor getImageData — which is why the
-// game also runs from file://.
+// All four atlases are 1024x1024 and need no chroma-key pass and no
+// getImageData, which is why the game also runs from file://. The two hull/
+// particle atlases carry straight alpha; the two ALIEN atlases are
+// premultiplied and are drawn as-is on purpose (CLAUDE.md §6).
 //
-// interceptor_atlas.png: 6 columns x 3 rows. Rows are the three playable ships;
-//   columns are engine-animation frames, 0-3 normal flight and 4-5 turbo.
-// projectiles_atlas.png: 5 columns x 5 rows. Rows are the five weapon
+// interceptor_atlas.png:   6 columns x 3 rows. Rows are the three playable
+//   ships; columns are engine frames, 0-3 normal flight and 4-5 turbo.
+// projectiles_atlas.png:   5 columns x 5 rows. Rows are the five weapon
 //   particles; columns are animation frames, cycled ping-pong (see data.js).
+// alien_noshoot_atlas.png: 5 columns x 5 rows. The five tumbling enemies.
+// alien_shoot_atlas.png:   5 columns x 5 rows. The five armed enemies. Shares
+//   the no-shoot atlas's cell grid exactly — see ENEMY_CELLS below.
 // ============================================================================
 
 const ATLAS_SOURCES = {
   ships: 'assets/sprites/interceptor_atlas.png',
   bullets: 'assets/sprites/projectiles_atlas.png',
   aliens: 'assets/sprites/alien_noshoot_atlas.png',
+  shooters: 'assets/sprites/alien_shoot_atlas.png',
 };
 
 // ---- Ship frame manifest (measured from the atlas alpha channel) -----------
@@ -67,15 +72,20 @@ const BULLET_H = 176;
 const BULLET_CORE_Y = [38, 40, 53, 43, 52];
 
 // ---- Enemy frame manifest (measured from the atlas alpha channel) ----------
-// alien_noshoot_atlas.png: 5 columns x 5 rows. Rows are the five enemy types;
-// columns are a charge/glow pulse (dull -> bright, spikes extending), NOT a
-// rotation — so spin is applied with ctx.rotate at draw time, which is also why
-// every box here is CENTRE-anchored rather than edge-anchored like the ships.
+// BOTH enemy atlases: 5 columns x 5 rows. Rows are the five types; columns are
+// a charge/glow pulse (dull -> bright, spikes extending), NOT a rotation — so
+// all turning is ctx.rotate at draw time, which is also why every box here is
+// CENTRE-anchored rather than edge-anchored like the ships. Measured: the
+// non-transparent pixel count climbs monotonically across every row of both
+// files, which is a charge ramp and not a spin.
 //
-// Unlike the ship and projectile atlases, this one really is a regular grid: the
+// Unlike the ship and projectile atlases, these really are a regular grid: the
 // alpha-weighted disc centroid sits on an even 204.75px pitch on BOTH axes
 // (102, 306.5, 511, 716, 921) and is stable to ~2px across a row's five frames.
-// One shared array therefore serves both axes.
+// One shared array therefore serves both axes — and, measured independently,
+// both files: of alien_shoot_atlas.png's 1,048,576 pixels exactly ONE
+// non-transparent pixel falls outside these cells, at (922, 204) with alpha 11.
+// So the armed set needs no manifest of its own, only its own image.
 //
 // Do NOT anchor these on the solid bounding box — spikes and glow inflate it
 // asymmetrically, which walks the apparent centre by up to 8px between frames
@@ -89,17 +99,25 @@ const BULLET_CORE_Y = [38, 40, 53, 43, 52];
 const ENEMY_CELLS = [0, 205, 409, 614, 819];  // box left/top per index
 const ENEMY_BOX = 204;
 
-// Disc radius as a fraction of the box half-size, measured from the frame-0
-// solid body (74-84 source px against a 102px half-box) with the spikes and
-// glow excluded. The collision basis — deliberately the metal hull, so a near
-// miss through the glow is a miss.
+// Default disc radius as a fraction of the box half-size, measured from the
+// frame-0 solid body (74-84 source px against a 102px half-box) with the spikes
+// and glow excluded. The collision basis — deliberately the metal hull, so a
+// near miss through the glow is a miss.
+//
+// This one number serves the whole no-shoot atlas because its five discs are
+// all within 0.73-0.82 of the half-box. The armed hulls are NOT: they measure
+// 0.78 / 0.47 / 0.60 / 0.62 / 0.65, because a hull with splayed prongs (row 1)
+// has far less solid body inside its footprint than a saucer does. A single
+// average there would give the prong-winged types a hitbox a third wider than
+// the metal, so those rows carry their own `disc` in ENEMY_TYPES and pass it
+// in below.
 const ENEMY_DISC_FRAC = 0.76;
 
 const Atlas = {
   imgs: {},         // key -> decoded HTMLImageElement; absent if that load failed
   ready: false,     // every source has settled, loaded or not
   failed: false,    // at least one source failed to load
-  tintCache: {},    // "row|frame|css" -> recoloured offscreen canvas; see tinted()
+  tintCache: {},    // "atlas|row|frame|css" -> recoloured canvas; see tinted()
 
   load(onDone) {
     const keys = Object.keys(ATLAS_SOURCES);
@@ -167,12 +185,13 @@ const Atlas = {
     );
   },
 
-  // Draw enemy type `row` frame `frame` in the CURRENT transform, centred on the
-  // origin, `dispW` logical px across. The caller has already translated to the
-  // enemy and applied its spin, so the box being centre-anchored means the disc
-  // turns about its own axis.
-  drawEnemy(ctx, row, frame, dispW) {
-    const img = this.imgs.aliens;
+  // Draw enemy type `row` frame `frame` from enemy atlas `key` in the CURRENT
+  // transform, centred on the origin, `dispW` logical px across. The caller has
+  // already translated to the enemy and applied its rotation, so the box being
+  // centre-anchored means a tumbling disc turns about its own axis and an armed
+  // hull pivots about its own middle rather than swinging off one.
+  drawEnemy(ctx, key, row, frame, dispW) {
+    const img = this.imgs[key];
     if (!img) return;
     ctx.drawImage(
       img,
@@ -181,9 +200,11 @@ const Atlas = {
     );
   },
 
-  // Collision radius for an enemy drawn `dispW` across — the disc, not the glow.
-  enemyHitRadius(dispW) {
-    return (dispW / 2) * ENEMY_DISC_FRAC;
+  // Collision radius for an enemy drawn `dispW` across — the solid hull, not
+  // the glow. `frac` is the type's own measured body fraction; omit it for the
+  // tumbling discs, which all sit close enough to share ENEMY_DISC_FRAC.
+  enemyHitRadius(dispW, frac) {
+    return (dispW / 2) * (frac || ENEMY_DISC_FRAC);
   },
 
   // ---- Explosions ----------------------------------------------------------
@@ -195,25 +216,27 @@ const Atlas = {
   //
   // Draws in the CURRENT transform, centred on the origin, `dispW` across.
   // `tintCss` recolours the frame; pass null to draw the row as authored, which
-  // is what makes an enemy's death burst match its own hull for free.
-  drawBurst(ctx, row, frame, dispW, tintCss) {
+  // is what makes an enemy's death burst match its own hull for free — and why
+  // `key` comes along: an armed enemy has to borrow its OWN atlas, not the
+  // tumbling one, or its wreck would be the wrong ship.
+  drawBurst(ctx, key, row, frame, dispW, tintCss) {
     if (tintCss) {
-      const c = this.tinted(row, frame, tintCss);
+      const c = this.tinted(key, row, frame, tintCss);
       if (c) {
         ctx.drawImage(c, -dispW / 2, -dispW / 2, dispW, dispW);
         return;
       }
     }
-    this.drawEnemy(ctx, row, frame, dispW);
+    this.drawEnemy(ctx, key, row, frame, dispW);
   },
 
   // Cached recolour of one atlas cell, built on first use. The cache is bounded
   // by the wreck palette in data.js times the rows it names — a handful of
   // 204px canvases for the whole session, built on the first player death.
-  tinted(row, frame, css) {
-    const img = this.imgs.aliens;
+  tinted(atlasKey, row, frame, css) {
+    const img = this.imgs[atlasKey];
     if (!img) return null;
-    const key = row + '|' + frame + '|' + css;
+    const key = atlasKey + '|' + row + '|' + frame + '|' + css;
     if (this.tintCache[key]) return this.tintCache[key];
 
     const c = document.createElement('canvas');

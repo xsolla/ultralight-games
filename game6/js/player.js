@@ -102,15 +102,23 @@ function startTurbo(p) {
   p.turboMs = PLAYER_TURBO_MS;
 }
 
-// Cycle to the next ship, keeping position and turbo state, and carrying the
+// Move to a specific ship, keeping position and turbo state, and carrying the
 // weapon level across a hull with different durability (CLAUDE.md §7).
-function cycleShip(p) {
+//
+// This is what the named-hull bonus calls; cycleShip below is the debug key.
+function setShip(p, idx) {
+  if (idx === p.ship) {
+    // Catching the hull you are already flying is a no-op, but it still flashes
+    // — silence would read as the pickup having failed.
+    p.swapMs = ANIM.SHIP_SWAP_MS;
+    return;
+  }
   const level = weaponLevel(p);
   const oldBase = SHIPS[p.ship].base;
   // How far into the current armour layer we are, 1..oldBase.
   const remainder = p.hits - (level - 1) * oldBase;
 
-  p.ship = (p.ship + 1) % SHIPS.length;
+  p.ship = idx;
 
   // At 0 hits there is no layer to map, so leave the counter dead rather than
   // letting the formula resurrect the ship with a negative level.
@@ -123,13 +131,22 @@ function cycleShip(p) {
   p.animMs = 0;
 }
 
+function cycleShip(p) {
+  setShip(p, (p.ship + 1) % SHIPS.length);
+}
+
 // Swap the weapon id only — `hits`, and so the weapon level, are untouched.
-function cycleWeapon(p) {
-  p.weapon = (p.weapon + 1) % WEAPONS.length;
+// This is what the named-weapon bonus calls; cycleWeapon below is the debug key.
+function setWeapon(p, idx) {
+  p.weapon = idx;
   // Abandon any half-emitted volley, or a staggered swap would finish the old
   // weapon's pattern using the new weapon's particle.
   p.volleyLeft = 0;
   p.fireMs = 0;
+}
+
+function cycleWeapon(p) {
+  setWeapon(p, (p.weapon + 1) % WEAPONS.length);
 }
 
 // Tick the gun and append any projectiles fired this frame to `out`.

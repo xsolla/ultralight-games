@@ -58,15 +58,18 @@ there when it arrives rather than inventing a new home for it.
   css/styles.css                        canvas scaling & page chrome
   js/constants.js                       cross-cutting tunables: CANVAS_W/H, COLORS, ANIM, PLAYFIELD
   js/atlas.js                           Atlas namespace: frame manifests, load, drawShip/drawBullet/drawEnemy
-  js/data.js                            SHIPS, FLIGHT_FRAMES, WEAPONS, ENEMY_TYPES, PATHS, FORMATIONS, DIFFICULTIES — and later BONUSES
+  js/data.js                            SHIPS, FLIGHT_FRAMES, WEAPONS, ENEMY_WEAPONS, ENEMY_TYPES, PATHS, FORMATIONS, DIFFICULTIES, BONUSES
   js/player.js                          ship state, flight model, input -> motion, the armor/weapon model, gun cadence
   js/weapons.js                         projectile geometry and motion (volley patterns, bullet update)
-  js/enemies.js                         enemy entity model: path evaluation, spin, death fade, culling
-  js/spawner.js                         wave scheduling, background trickle, difficulty ramp
+  js/enemies.js                         enemy entity model: path evaluation, facing, death fade, culling
+  js/shooters.js                        armed enemies: the gun script, and the one steered flight path
+  js/wingmen.js                         the escort entity model: formation flying and their gun
+  js/pickups.js                         the caught-bonus entity model: bubbles, drift, drop rolls
+  js/spawner.js                         wave scheduling, background trickle, armed set pieces, difficulty ramp
   js/collide.js                         hit tests and damage resolution
   js/explosions.js                      burst entity model: fireball, debris, the player's wreck
   js/ambiance.js                        Stars namespace: parallax starfield; later nebula
-  js/render.js                          all canvas drawing — world, HUD, cards
+  js/render.js                          all canvas drawing — world, HUD, cards — and HUD layout
 ○ js/menu.js                            title, ship select, difficulty, records screens
 ○ js/audio.js                           Sound namespace
 ○ js/scores.js                          localStorage high-score table
@@ -74,21 +77,29 @@ there when it arrives rather than inventing a new home for it.
   assets/sprites/interceptor_atlas.png  the three player ships, 6 frames each
   assets/sprites/projectiles_atlas.png  the five weapon particles, 5 frames each
   assets/sprites/alien_noshoot_atlas.png  the five non-shooting enemies, 5 frames each
-○ assets/sprites/alien_shoot_atlas.png  present but unused — the shooting enemy set
+  assets/sprites/alien_shoot_atlas.png  the five armed enemies, 5 frames each
 ```
+
+`../branding.md`, at the repo root rather than in this folder, is the shared spec for
+the three HUD buttons and the Xsolla wordmark — every game in the repo copies from it
+verbatim. See §5.
 
 **Load order** — declare it in `index.html` with a comment, exactly as the reference
 game does (`<!-- Load order: constants -> shared geometry -> data -> render -> game. -->`):
 
 ```
-constants -> atlas -> data -> pure logic (player, weapons, enemies, spawner, collide,
-             explosions) -> presentation (ambiance, render, menu)
+constants -> atlas -> data -> pure logic (player, weapons, enemies, shooters,
+             wingmen, pickups, spawner, collide, explosions)
+          -> presentation (ambiance, render, menu)
           -> subsystems (audio, scores) -> game
 ```
 
 Within pure logic the order is only about *load-time* references: `player.js` calls into
-`weapons.js` and `spawner.js` calls into `enemies.js`, but always from inside functions
-that run after `Game.init()`, which is what keeps the graph acyclic.
+`weapons.js`, `spawner.js` calls into `enemies.js`, and `shooters.js` calls into
+`weapons.js`, but always from inside functions that run after `Game.init()`, which is
+what keeps the graph acyclic. The one load-time reference across that group is
+`SHOOTER_IDX` in `spawner.js`, which slices `ENEMY_TYPES` — and `data.js` is already
+ahead of it.
 
 Nothing may reference a global from a file loaded after it *at load time*. Referencing
 it from inside a function that only runs after `Game.init()` is fine — that is how
@@ -214,6 +225,61 @@ Two consequences for a shooter specifically: HUD buttons sit over the playfield,
 of the thumb's flight path), and **test the HUD hit rects before the playfield** in
 `onPointerDown` so a tap on a button never also steers.
 
+### The HUD as built
+
+**`../branding.md` is the authority for the three shared buttons** — sound, exit,
+fullscreen — and for the Xsolla wordmark that will go on the title screen. Those are
+repo-wide house elements: every game must draw them identically, so `HUD_BTN` and the
+three icon functions in `render.js` are transcribed from it and are **not tuning
+knobs**. Two of its colours are near-misses of values already in `COLORS`
+(`#8aa0bd` vs `hudDim`, stroke `0.30` vs `hudStroke`'s `0.28`) and the near-misses are
+deliberate — do not harmonise them. Re-derive from `branding.md`, never from `COLORS`.
+
+**One layout deviation, in the terms `../branding.md` §6 asks for.** The spec is a
+vertical column at a right inset of 28 on an 800 × 600 field. Both numbers break at
+360 × 640: a column runs 102 px down the right edge, straight through the lane the ship
+dodges into at the top, and an inset of 28 is 7.8% of the width against 3.5% there. So
+the buttons are a **horizontal row at this game's own `HUD_PAD`** — the deviation
+game4 made, for the same reason. Every appearance value is untouched. Hit rects are
+grown by `HUD_BTN_SLOP` and the drawn button is not, so touch targets improve without
+the shared look changing.
+
+**Layout is a pure function, not a stashed rect.** `hudButtonRects()` and
+`hudButtonAt()` in `render.js` derive the geometry from constants; `render.js` paints
+from them and `game.js` hit-tests through them. This is the contract above with the
+drift designed out — there is no stored rect to go stale and none to clear on a screen
+change — and it is why `render.js` still mutates nothing.
+
+**The ship and the buttons never fight over a pointer.** A `pointerdown` on a button
+sets `Game.hudCapture` and returns before anything steers or fires, and the capture
+holds until release, so dragging off a button cannot fling the ship into the corner
+behind it. A bare cursor merely *resting* on a button also suppresses steering — same
+rule, read from the other side.
+
+**Rows, top to bottom, ordered by how urgently they are needed mid-run** rather than by
+how permanent they are:
+
+| Row | Content | Why there |
+|---|---|---|
+| 1 | Weapon name, 15px | The only line that changes without the player acting — a caught bonus can swap it for something worse (§7) |
+| 2 | The armour bar, and `LVn` at its end | Armour *is* weapon level *is* the life bar, so it is the loudest thing on screen |
+| 3 | `SHIP · hits / max`, 10px | A caption under the bar it explains |
+| — | Turbo, only during a burst | Slotted under the bar so the two read as one instrument stack |
+
+**The armour bar shows hull capacity, not just armour.** Five cells are the five weapon
+levels; the *segments inside a cell* are that ship's `base`, so the same bar is 3-up,
+4-up or 5-up depending on what is being flown, and a mid-run ship swap visibly
+re-slices it. That is the only place the player ever learns that a Verdant layer costs
+five hits where an Interceptor layer costs three. Segment widths derive from the cell,
+so capacity changes the grain and never the size, and every slot keeps a faint outline
+so a nearly-empty bar still shows its ceiling.
+
+**The header sits on a three-stop scrim, not a panel.** The ship can reach `y = 28` and
+enemies enter through the top edge, so the text needs something behind it — but a hard
+panel edge across a 9:16 field reads as the playfield being shorter than it is. A plain
+linear fade is already half gone by the hull caption, so the scrim holds near full
+strength to `HUD_SCRIM_HOLD` and puts the whole of its falloff below the text.
+
 ## 6. Asset pipeline — read this before touching sprites
 
 ### What `interceptor_atlas.png` actually is
@@ -308,6 +374,32 @@ Also measured from the alpha channel, not assumed:
   (row 0 frame 3 measures y=110.5 against y=102 for its neighbours), which on a spinning
   sprite shows up as the disc wobbling around its own axis.
 
+### What `alien_shoot_atlas.png` actually is
+
+Measured the same way, and the headline is that it needs **no manifest of its own**:
+
+- **1024 × 1024, 5 columns × 5 rows**, and it shares the no-shoot atlas's cell grid
+  *exactly*. The alpha-weighted centroid sits on the same even 204.75 px pitch on both
+  axes (102, 306.5, 511, 716, 921) and is stable to ~2 px across a row, so `ENEMY_CELLS`
+  / `ENEMY_BOX` serve both files: of this atlas's 1,048,576 pixels exactly **one**
+  non-transparent pixel falls outside those cells, at (922, 204) with alpha 11.
+- **Columns are the same charge/glow pulse**, not a rotation — the non-transparent
+  pixel count climbs monotonically across every row — so `ENEMY_FRAMES` ping-pongs it
+  unchanged and all turning is `ctx.rotate`.
+- **It is PREMULTIPLIED too** (0 of 20,633 partial-alpha pixels have a channel
+  exceeding alpha), so §6's "draw as-is, do not fix at runtime" note applies to both
+  alien atlases, and both need re-checking if a lighter backdrop ever lands.
+- **Every hull faces up the screen** and rows 1–4 have a clear nose and tail. So unlike
+  the tumbling discs these do not spin: `spin` is 0 for all five and their heading is
+  chosen instead — see `face` in `ENEMY_TYPES`.
+- **The one thing that does NOT carry over is the hit circle.** `ENEMY_DISC_FRAC` of
+  0.76 fits the no-shoot discs because all five measure 0.73–0.82 of the half-box.
+  These measure **0.78 / 0.47 / 0.60 / 0.62 / 0.65** — a hull with splayed prongs
+  (row 1) has far less solid body inside its footprint than a saucer does. Averaging
+  them would give the prong-winged types a hitbox a third wider than their metal, so
+  each armed row carries its own `disc` and `Atlas.enemyHitRadius` takes it as an
+  argument.
+
 ### Missing atlases
 
 Asteroids have no art yet. Until it arrives,
@@ -337,9 +429,14 @@ deciding it is purely additive), and re-measure it either way.
 
 | # | Name             | Base durability | Handling                          |
 |---|------------------|-----------------|-----------------------------------|
-| 1 | Light interceptor| 3 hits          | fastest, smallest hitbox          |
-| 2 | Red heavy        | 4 hits          | middle                            |
-| 3 | Green heavy      | 5 hits          | slowest, largest hitbox           |
+| 1 | Light interceptor| 2 hits          | fastest, smallest hitbox          |
+| 2 | Red heavy        | 3 hits          | middle                            |
+| 3 | Green heavy      | 4 hits          | slowest, largest hitbox           |
+
+Tightened from the original 3/4/5 now that enemies shoot back. `base` is per ARMOUR
+LAYER and there are five of them, so the slack was being paid five times over: a
+level-1 interceptor taking three separate hits before dying made the opening of a run
+uneventful. Total durability is `base * 5` — 10, 15 and 20 hits at full armour.
 
 All three are selectable at the title screen. Ship-change bonuses can move the player
 to any of them mid-run, including a downgrade.
@@ -361,9 +458,9 @@ weaponLevel = Math.ceil(hits / base)
   automatically.
 - **Heal bonus:** `hits += 1`, capped at `base * 5`.
 
-This single counter reproduces the whole spec. Ship 2 (`base = 4`) at weapon level 3
-starts at `hits = 12`; 4 hits → `hits = 8`, level 2; 4 more → `hits = 4`, level 1;
-4 more → dead, 12 total. And a heal at full level-3 armor gives `hits = 13` →
+This single counter reproduces the whole spec. Ship 2 (`base = 3`) at weapon level 3
+starts at `hits = 9`; 3 hits → `hits = 6`, level 2; 3 more → `hits = 3`, level 1;
+3 more → dead, 9 total. And a heal at full level-3 armor gives `hits = 10` →
 level 4 with exactly one hit in the new layer, which is precisely
 "upgraded to next level with just one hit."
 
@@ -374,6 +471,34 @@ level 4 with exactly one hit in the new layer, which is precisely
 Damage sources are all worth exactly 1 hit: enemy projectiles, enemy body impacts,
 asteroid impacts. Give the player brief post-hit invulnerability with a blink so a
 single collision can't drain several layers.
+
+**Every hit flashes and shakes.** Both go through `Game.onPlayerHit(color, spark)`,
+which is the single place a hit becomes feedback — so a new damage source cannot
+arrive with one half of it missing:
+
+- An **impact burst at the ship's own centre** (`explodeImpact` in `explosions.js`),
+  small and short — it is a hit landing *on* the hull, not something being destroyed,
+  so it must be gone well before the 1200 ms grace period ends or it reads as the
+  damage never having stopped.
+- **In the colour of whatever landed it**, never the ship's: the flash is what tells
+  the player what got them. A rammed hull hands over its `ENEMY_TYPES` colours, a
+  projectile its `PARTICLE_COLORS` entry (indexed by atlas row, so one measurement
+  serves both the wreck palette and this).
+- **A source with no colour of its own passes `null`** and gets a random pick from
+  `WRECK_PALETTE`. Random rather than a fixed fallback because a fixed one would
+  quietly become "the colour of things we forgot to attribute" and start reading as
+  its own damage type. That palette because it is already a deliberate spread of hues,
+  so a random pick still looks chosen.
+- **Screen shake**, decaying quadratically so most of the movement is in the first
+  third, where the blow was. Death shakes about twice as hard and twice as long. A
+  bigger shake replaces a running one outright rather than adding to it — two hits in
+  quick succession must not stack into something that throws the playfield around, and
+  a death landing on top of a graze must not be damped down to the graze.
+
+The shake translates **the world only**. The background gradient sits outside it
+because it is full-bleed and translating it would expose an unpainted edge; the HUD
+sits outside it because `hudButtonRects()` is a pure function of constants, so buttons
+that moved under the transform would stop being what the player is tapping (§5).
 
 ### Weapons
 
@@ -392,10 +517,47 @@ Firing is automatic on touch devices, and LMB / Space on desktop (§8).
 Data-driven `ENEMY_TYPES` table in `js/data.js`: sprite, hp, speed, contact damage,
 score, and whether it shoots. Some drop bonuses on death (per-type drop chance).
 
+**One table holds both halves of the roster** — the five tumbling types from
+`alien_noshoot_atlas.png` and the five armed types from `alien_shoot_atlas.png` — so
+`collide.js`, `explosions.js` and `render.js` go on indexing `ENEMY_TYPES[e.t]` without
+learning that shooters exist. `atlas` says which image a row's `row` indexes; `shoots`
+is what splits the two spawn streams.
+
+**The armed five are 1:1 with their atlas rows and with their behaviour**, because for
+these the movement *is* the identity — an arrowhead that wove would not be an
+arrowhead. So each carries its own `path` rather than having one rolled for it, plus a
+`gun` script (`weapon`, `count`, `aim`, `intervalMs`, and optionally `fireFrom` /
+`volleys`) and a `face` mode:
+
+| # | Name     | Behaviour                                                        | Weapon    |
+|---|----------|------------------------------------------------------------------|-----------|
+| 0 | Marauder | one straight line, mostly down the screen, sometimes up it       | Mystic    |
+| 1 | Harrier  | trio in arrowhead: in, hold, 3 salvoes, retreat the way it came  | Plasma    |
+| 2 | Reaver   | a chain on one broad curve, each link aiming at the player       | Spark     |
+| 3 | Stalker  | a chaser, steering and correcting, firing down its own nose      | Fury      |
+| 4 | Corsair  | a wing crossing edge to edge, half its shots aimed at the player | Lightning |
+
+`face` is how the heading is found, and it is the reason none of them tumble:
+`'fixed'` keeps the heading chosen at birth forever (which is what lets the Harrier
+back out of its attack run *without turning round*), `'travel'` points along the last
+frame's movement so a hull banks through a curve for free, and `'steer'` means the
+heading is the state and `shooters.js` owns it.
+
+**Incoming fire is its own table**, `ENEMY_WEAPONS` in `js/data.js`, using the same
+five rows of `projectiles_atlas.png` the player does and the same `shotAim` in
+`weapons.js`. Only the tuning differs, and it has to: a player's shot is tuned to
+travel away from the eye, and 380–600 px/s coming *toward* the eye is not dodgeable on
+a 640 px screen. These run at roughly half that. Damage is 1 everywhere, per the rule
+below. Enemy shots live on `Game.enemyBullets` rather than being flagged inside
+`Game.bullets`, because every consumer wants exactly one of the two lists.
+
 Every path must **commit downward**: an enemy that stalls or turns back mid-screen
 reads as timid, and a path whose vertical speed can reach zero is the bug that
 causes it. `PATHS` entries are checked against this — see the note at the top of
-that table. Movement must be varied — singles and formations, straight descents,
+that table. Three armed paths are deliberate exceptions, and all three honour what
+the rule is actually protecting: `shooterRun` climbing out of the bottom and
+`shooterCross` crossing edge to edge both leave promptly and never reverse, and
+`shooterArrow` reverses exactly once, at a scripted moment, *after* it has fired. Movement must be varied — singles and formations, straight descents,
 sine weaves, arcs, strafing dives, side entries, and formations that hold a
 pattern while the pattern itself translates. Implement as a `PATHS` table in `js/data.js` of
 `(t, spawnParams) -> {x, y}` functions so a formation is "N enemies on path P with
@@ -407,6 +569,13 @@ staggered phase," not bespoke code per wave.
   background flow, never instead of it — the screen is never empty.
 - **Difficulty ramps with elapsed run time**, scaling spawn rate, enemy mix, enemy
   speed, and shooter proportion. Ramp continuously; avoid cliffs the player can't read.
+- **Armed types spawn on a third timer**, independent of both the trickle and the
+  waves, because each of the five is a scripted encounter with its own geometry and
+  its own beginning and end — a trickle that dealt them out singly would destroy the
+  shape that makes them read. Which one arrives is a flat roll: none of them is a
+  harder version of another, so meeting them in an unpredictable order is what stops a
+  run becoming a rota. Measured over five minutes on normal: 34% of frames with no
+  armed encounter, 58% with one, 8% with two, never three.
 - **Three selectable difficulties** — easy / normal / hard — expressed as multipliers
   over the same ramp curve (spawn rate, enemy hp, projectile speed, bonus drop rate),
   not as separate spawn tables. They live in a `DIFFICULTIES` object in `js/data.js`
@@ -421,17 +590,52 @@ the player on contact for 1 hit. They are pure obstacles — no score, no drops.
 
 ### Bonuses (caught, not bought)
 
-Dropped by some enemies on death, then drift down; the player flies into them.
+Dropped by dying enemies — `ENEMY_TYPES.drop` per type, times `DIFFICULTIES.dropMult`
+— then they drift down, sway, and pop after `PICKUP_LIFE_MS` if nobody catches them.
+The player flies into them; the whole bubble catches, not just its picture.
 
-| Bonus         | Effect |
-|---------------|--------|
-| Heal / upgrade| `hits += 1`, capped at `base * 5` — becomes a weapon-level upgrade when armor is full (§7) |
-| Weapon change | Swap to a different weapon at the same level; can be worse |
-| Ship change   | Swap to a different ship, preserving weapon level; can be a downgrade |
-| Speed boost   | Boost mode for 5 seconds — higher speed, visible exhaust/trail change |
-| Nuke          | Instantly kills every enemy currently on screen |
+Every bonus is **a transparent soap bubble with a still picture inside**. The bubble is
+vector — body gradient, three fixed iridescent arcs, two speculars — and is drawn *over*
+the picture, because a film is in front of what it contains and the rim crossing the
+glyph is what sells the thing as sealed rather than pasted on. So **a new bonus costs
+art only if its picture does**, and so far none has.
 
-Weapon and ship changes are genuine gambles, not strict upgrades. Keep them that way.
+| Bonus | Effect | Picture inside |
+|---|---|---|
+| Heal / upgrade | `hits += 1`, capped at `base * 5` — a weapon-level upgrade when armour is already full | green `+` |
+| **Damage** | Costs one hit, through the ordinary damage path | red `−`, red bubble |
+| Named weapon | Swap to *that* weapon at the same level | its initial, in its particle's colour |
+| Named ship | Swap to *that* hull, carrying weapon level across | that ship's sprite |
+| Speed boost | Turbo for `PLAYER_TURBO_MS` | amber chevrons |
+| Wingmen | Two escorts for 10 s | three darts in a V |
+| Nuke | *Not implemented.* Kills every enemy on screen | — |
+
+Three fields keep a bonus a row rather than a branch in three files: `kind` is what it
+does (dispatched through `BONUS_EFFECTS` in `game.js`), `glyph` is what is drawn inside
+(dispatched in `render.js`), and `pick` names a table to roll an index from at spawn.
+That roll lands on the pickup as `arg`, which is why one row serves all five weapons.
+
+**The named bonuses are an informed choice, not a gamble.** This reverses the original
+rule — weapon and ship changes used to be deliberate gambles that could hand you
+something worse. Showing which weapon or hull is inside is incompatible with that, and
+the trade was made knowingly: the `−1` trap now carries the "read the bubble before you
+fly at it" job the gambles used to. The trap's red is reserved; nothing else in
+`BONUSES` may use that hue, because the tint is the only cue separating a prize from a
+punishment at a distance.
+
+**The trap goes through the normal damage path** rather than editing `hits` — so it
+gets the same flash, shake and grace period as being shot, and is likewise *absorbed*
+during that grace. A trap that ignored invulnerability would punish one mistake twice.
+
+**Wingmen** are two hulls flying formation, granted by one bonus. Hull and weapon are
+rolled **once and shared** — a mismatched pair reads as two unrelated pickups rather
+than as a squadron arriving. Their guns are **always level 1**, which needs no special
+case: `shotAim` already returns a single shot dead ahead for a count of 1, as a
+universal rule ahead of any pattern. They fire on the *player's* trigger, so they are an
+extension of the gun rather than an autonomous ally. They have no collision at all —
+enemies pass through them — which keeps a whole damage model out of a ten-second
+effect. Re-catching **replaces and re-rolls** rather than stacking, or a lucky run ends
+up flying a wall of escorts.
 
 ### Scoring and persistence
 
@@ -490,28 +694,68 @@ Not yet settled — ask rather than assuming:
   (parallel column), Fiery Fury (15° staggered gatling sweep), Lightning Gun (90° fan).
   Level is the particle count; level 1 is always one shot dead ahead. Expanding means a
   new row plus, if the shape is genuinely new, a `pattern` case in `weapons.js`.
-- **Audio.** The reference game's `audio.js` is a good template — preloaded
-  `HTMLAudioElement` pools for SFX, a streamed looping BGM track, a three-state
-  `Game.soundState` (`'on'` / `'musicoff'` / `'off'`), every entry point guarded so a
-  missing file yields silence rather than a crash. Unknown whether this game wants
-  audio at all, and no audio assets exist.
+- **Audio.** Still unknown whether this game wants audio at all, and no audio assets
+  exist — but the *contract* now does: `Game.soundState` is live, the HUD's sound
+  button walks the `SOUND_CYCLE` in `constants.js` (`'on'` → `'musicoff'` → `'off'`),
+  and the icon already shows which state it is in. So `audio.js`, when it lands, is a
+  reader of existing state rather than a change to the HUD. The reference game's
+  module is the template — preloaded `HTMLAudioElement` pools for SFX, a streamed
+  looping BGM track, every entry point guarded so a missing file yields silence rather
+  than a crash.
 - **Asteroid art.** No atlas yet; placeholders until then (§6). Enemy and projectile
   art has landed, and explosions are ~~open~~ settled — they reuse the enemy atlas (§6).
-  `alien_shoot_atlas.png` is in the repo but unused — shooting enemies are not
-  implemented, and `ENEMY_TYPES.shoots` is the flag waiting for them.
+  ~~`alien_shoot_atlas.png` is in the repo but unused.~~ Settled: all five armed types
+  are implemented off it and `ENEMY_TYPES.shoots` now splits the spawn streams.
 - **What happens after death.** The ship now dies and blows apart at 0 hits, but with
   no `menu.js` or `scores.js` the run just restarts on the same hull after
   `RESPAWN_MS`. The real flow in §7 is game-over card → title → records; that restart
   is scaffolding and should go with the debug keys.
-- **True homing.** `PATHS` entries are pure `(age, params) -> {x, y}` and so cannot see
-  the player. The `intercept` path aims at the player's position *at spawn* instead,
-  which is readable and dodgeable. A real chaser would need a stateful steer function —
-  a bigger change than it looks, and probably worse to play against.
+
+  The HUD's exit button has the same gap. `branding.md` §2 says it returns to the title
+  screen; there is no title screen, so `Game.endRun()` ends the run instead — the way
+  game1's exit does, and *through the wreck* rather than around it, so the button
+  produces feedback the player has already been taught to read. Rewiring it when
+  `menu.js` lands is a one-line change and nothing else in the HUD moves.
+- ~~**True homing.**~~ Settled: the Stalker is a real chaser, and it is the one motion
+  in the game that is not a function of age. `PATHS.homing` therefore holds only its
+  spawn point, `enemies.js` skips path evaluation for a type with `steer` set, and
+  `shooters.js` integrates position and heading instead. Everything else stays pure, so
+  formations still cannot shear apart.
+
+  Three knobs are what keep it fair rather than a magnet, and they are the thing to
+  reach for if it plays badly. Its **turn rate**, not its speed, is what makes it
+  dodgeable — bait the turn and cut across it. It **re-aims on a timer** (90 ms), which
+  is a feel decision and not a cost one: the cost is one `atan2` per chaser and a
+  handful are ever alive, but a heading corrected every frame is glued to the player
+  and jitters as they cross its nose. And it **stops re-aiming** after
+  `STEER_COMMIT_MS` and flies out on its last heading, so every Stalker is one
+  committed pass rather than an orbit that only ends at the age backstop. Note the
+  timer is in milliseconds, not frames — a frame count would make it track harder at
+  144 fps than at 30.
+
+  The `intercept` path is still there and still aims once, at spawn. The two now
+  contrast deliberately: `intercept` is dodged *before* it commits, the Stalker after.
 - **Scoring.** `ENEMY_TYPES.score` and the kill count returned by `resolveBulletHits`
   are both in place, but nothing is wired to a score yet.
-- **Ship durability mapping.** `SHIPS` in `data.js` follows the original 3/4/5 spec,
-  but in the delivered art ship 1 (armoured grey/red, twin heavy cannons) reads as the
-  toughest hull while ship 2 (white/green) reads mid-weight — which argues for 3/5/4.
+
+- **The nuke.** The last bonus in §7 with no implementation. When it lands it should
+  STAGGER its kills rather than raise `EXPLOSION_MAX`: 90 bursts in one frame would be
+  dropped straight back out by `pushBurst`, and a screen clearing in a ripple looks
+  better than one clearing in a flash.
+
+- **More bonuses.** The table is built to take them — a row in `BONUSES`, an entry in
+  `BONUS_EFFECTS`, a `case` in `drawBonusGlyph`. Sketched and not built: shield
+  (extends `invulnMs`, nearly free), bullet-cancel (one line — clear `enemyBullets`),
+  rapid fire, piercing shots, slow-motion, score gems and a magnet. Of those only
+  slow-motion, the gem and piercing would want new art; the rest are glyphs in the
+  idiom already here.
+- ~~**Ship durability mapping.**~~ Settled at **2/3/4** (§7): the original 3/4/5 was
+  tuned before enemies could shoot back, and `base` is charged per armour layer, so
+  every point of it counts five times. What is still open is the ORDER, not the
+  spread — in the delivered art ship 1 (armoured grey/red, twin heavy cannons) reads
+  as the toughest hull while ship 2 (white/green) reads mid-weight, which argues for
+  2/4/3. Left alone because the names and the handling table still follow the original
+  reading; changing it means changing both.
 - **Boss encounters.** Not mentioned. Currently assumed out of scope.
 - **Pause.** Assumed wanted (`'paused'` is in the screen list) but not specified.
 - **Logical resolution.** 360 × 640 is chosen, but the source art has enough detail

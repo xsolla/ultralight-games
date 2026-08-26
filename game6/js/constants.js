@@ -41,7 +41,12 @@ const COLORS = {
 
   armor: '#7fd4ff',                        // a banked, fully intact armour layer
   armorLive: '#ffb347',                    // the layer currently being chewed through
-  armorTrack: 'rgba(127, 212, 255, 0.15)', // empty slot
+  armorTrack: 'rgba(127, 212, 255, 0.15)', // a spent hit inside a slot
+  // Outline around each of the five level slots, lit or not. Without it a bar
+  // that is nearly empty has almost nothing left to see and the player loses the
+  // sense of how much is missing — the ceiling has to stay visible when the
+  // contents do not.
+  armorCell: 'rgba(127, 212, 255, 0.22)',
 };
 
 // ---- Animation timings (ms) ------------------------------------------------
@@ -54,6 +59,14 @@ const ANIM = {
 
 // Font stack for every piece of canvas text — no web fonts anywhere.
 const FONT = 'system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
+
+// ---- Sound state -----------------------------------------------------------
+// The HUD's sound button is deliberately THREE-state rather than a boolean
+// (branding.md §2): players commonly want the music off but the feedback sounds
+// kept. 'on' = music + sfx, 'musicoff' = sfx only, 'off' = silent, and the
+// button walks this cycle. Nothing reads it yet — there is no audio.js — but the
+// state is the contract that module will read, and the icon already shows it.
+const SOUND_CYCLE = { on: 'musicoff', musicoff: 'off', off: 'on' };
 
 // ---- Shared math -----------------------------------------------------------
 const DEG = Math.PI / 180;

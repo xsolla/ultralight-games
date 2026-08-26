@@ -61,10 +61,11 @@ function resolveBulletHits(bullets, enemies, dt) {
     for (let ei = 0; ei < enemies.length; ei++) {
       const e = enemies[ei];
       if (enemyDying(e)) continue;
-      const r = Atlas.enemyHitRadius(ENEMY_TYPES[e.t].dispW);
+      const type = ENEMY_TYPES[e.t];
+      const r = Atlas.enemyHitRadius(type.dispW, type.disc);
       if (segPointDistSq(x0, y0, b.x, b.y, e.x, e.y) > r * r) continue;
 
-      e.hp -= WEAPONS[b.w].damage;
+      e.hp -= bulletWeapon(b).damage;
       if (e.hp <= 0 && killEnemy(e)) killed.push(e);
       bullets.splice(bi, 1);
       break;   // one bullet, one enemy
@@ -85,7 +86,7 @@ function resolvePlayerHits(player, enemies) {
 
   for (const e of enemies) {
     if (enemyDying(e)) continue;
-    const r = Atlas.enemyHitRadius(ENEMY_TYPES[e.t].dispW);
+    const r = Atlas.enemyHitRadius(ENEMY_TYPES[e.t].dispW, ENEMY_TYPES[e.t].disc);
     if (!circlesOverlap(player.x, player.y, pr, e.x, e.y, r)) continue;
 
     // Every damage source in the game is worth exactly one hit (§7); `contact`
@@ -96,4 +97,66 @@ function resolvePlayerHits(player, enemies) {
     return e;
   }
   return null;
+}
+
+// Resolve drifting bonuses against the ship. Returns the ones caught this frame
+// and removes them from the list; game.js applies their effects, the same
+// division of labour the two damage resolvers use.
+//
+// A circle test, not the segment test the projectiles get: a bubble drifts at
+// 62px/s, which is 1 logical px in a clamped frame, so there is nothing to
+// tunnel through. And the whole bubble catches, not just its picture — a
+// pickup that has to be hit precisely is a pickup that gets missed.
+//
+// A wrecked ship catches nothing, but an INVULNERABLE one catches everything:
+// the grace period is combat grace, and a player who cannot collect during it
+// would be punished twice for one hit.
+function resolveCatches(player, pickups) {
+  const caught = [];
+  if (player.dead || player.hits <= 0) return caught;
+  const pr = playerHitRadius(player);
+  for (let i = pickups.length - 1; i >= 0; i--) {
+    const b = pickups[i];
+    if (!circlesOverlap(player.x, player.y, pr, b.x, b.y, PICKUP_R)) continue;
+    caught.push(b);
+    pickups.splice(i, 1);
+  }
+  return caught;
+}
+
+// Resolve incoming enemy fire against the ship. Returns the projectile that
+// landed the damage — which the caller turns into the impact flash, in that
+// shot's own colour — or null. At most one can ever land in a frame: the first
+// one sets the grace period and the rest of the frame's shots are absorbed by
+// it, so a wall of fire costs exactly one armour layer.
+//
+// Death is NOT reported and is not decided here; game.js checks the counter once
+// a frame, so every damage source reaches death the same way.
+//
+// The segment test is the same one player fire gets, for the same reason: at the
+// 100ms dt clamp a 265px/s shot advances 26 logical px, which is wider than the
+// player's ~12px hit circle, so a point test would let shots tunnel through the
+// hull on a stuttering frame.
+function resolveEnemyBulletHits(player, bullets, dt) {
+  if (player.hits <= 0) return null;
+  const sec = dt / 1000;
+  const pr = playerHitRadius(player);
+  let landed = null;
+
+  for (let i = bullets.length - 1; i >= 0; i--) {
+    const b = bullets[i];
+    const x0 = b.x - b.vx * sec, y0 = b.y - b.vy * sec;
+    if (segPointDistSq(x0, y0, b.x, b.y, player.x, player.y) > pr * pr) continue;
+
+    // The shot always stops on the hull, invulnerable or not. Letting it pass
+    // through during the grace period would make the grace a free screen-clear
+    // and would look wrong besides; absorbing it costs the player nothing.
+    bullets.splice(i, 1);
+    if (player.invulnMs > 0) continue;
+
+    for (let n = 0; n < bulletWeapon(b).damage; n++) damagePlayer(player);
+    player.invulnMs = PLAYER_INVULN_MS;
+    landed = b;
+  }
+  return landed;
 }

@@ -1,10 +1,13 @@
 // ============================================================================
 // weapons.js — projectile geometry and projectile motion. Pure functions over
-// plain bullet objects and the WEAPONS table; holds no state of its own.
+// plain bullet objects and the WEAPONS / ENEMY_WEAPONS tables; holds no state of
+// its own.
 //
-// Decides WHERE a volley's particles go and HOW they travel. It does not decide
-// WHEN to fire (that is the player's gun cadence, in player.js), does not read
-// input, does not draw, and does not resolve hits.
+// Decides WHERE a volley's particles go and HOW they travel, for BOTH sides:
+// a player shot and an enemy shot are the same entity flying the same way out of
+// the same atlas, and differ only in which table tunes them. It does not decide
+// WHEN to fire (the player's gun cadence is player.js, the enemies' is
+// shooters.js), does not read input, does not draw, and does not resolve hits.
 //
 // Angle convention throughout: 0 is straight up the screen and positive turns
 // clockwise (screen coords, +y down). Sprites are authored nose-up, so a shot's
@@ -16,6 +19,12 @@
 // are the realistic worst case (~50 alive); this is well clear of that and only
 // exists so a future rapid-fire weapon can't uncap the fill rate.
 const BULLET_MAX = 180;
+// The same ceiling for incoming fire, on its own array and deliberately lower.
+// The realistic worst case is a Reaver chain plus a Corsair wing, which is ~14
+// guns at roughly one shot a second each against shots that cross the screen in
+// two to three seconds — call it 40 alive. Anything approaching this figure is
+// a screen the player cannot read, so the cap doubles as a bug alarm.
+const ENEMY_BULLET_MAX = 90;
 // How far past the canvas a bullet's tip travels before it is culled. Bullets
 // are anchored at the tip with the trail BEHIND them, so this must exceed the
 // longest projectile's on-screen length (~29px at dispW 16) or trails would pop
@@ -67,20 +76,40 @@ function shotAim(weapon, n, i, sweepPhase) {
   return { ang: 0, offX: 0 };
 }
 
-// Append one projectile travelling on `ang` from the muzzle at (x, y).
+// The table a bullet's `w` indexes. One flag rather than two entity types: the
+// two sides share the atlas, the motion, the animation and the cull rules, and
+// differ only in where they are tuned. render.js and collide.js both go through
+// this so neither has to know which array it was handed.
+function bulletWeapon(b) {
+  return (b.foe ? ENEMY_WEAPONS : WEAPONS)[b.w];
+}
+
+// Append one player projectile travelling on `ang` from the muzzle at (x, y).
 function spawnBullet(out, weaponIdx, x, y, ang, offX) {
-  if (out.length >= BULLET_MAX) return;
-  const wp = WEAPONS[weaponIdx];
+  pushBullet(out, false, weaponIdx, WEAPONS[weaponIdx].speed, x, y, ang, offX);
+}
+
+// The same, from an enemy gun. `speedMult` is the difficulty's incoming-fire
+// dial and is applied here rather than baked into the table, so one table row
+// serves all three difficulties.
+function spawnEnemyBullet(out, weaponIdx, x, y, ang, offX, speedMult) {
+  pushBullet(out, true, weaponIdx,
+             ENEMY_WEAPONS[weaponIdx].speed * speedMult, x, y, ang, offX);
+}
+
+function pushBullet(out, foe, weaponIdx, speed, x, y, ang, offX) {
+  if (out.length >= (foe ? ENEMY_BULLET_MAX : BULLET_MAX)) return;
   const sin = Math.sin(ang);
   const cos = Math.cos(ang);
   out.push({
     w: weaponIdx,
+    foe,
     // offX is perpendicular to the heading, so an offset column stays square to
     // its own line of travel rather than to the screen.
     x: x + offX * cos,
     y: y + offX * sin,
-    vx: sin * wp.speed,     // logical px/s
-    vy: -cos * wp.speed,    // logical px/s; up the screen is -y
+    vx: sin * speed,     // logical px/s
+    vy: -cos * speed,    // logical px/s; up the screen is -y
     ang,
     // Random starting phase so the particles in one volley don't pulse in
     // lockstep, which reads as a single flashing object rather than several.

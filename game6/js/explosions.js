@@ -7,14 +7,17 @@
 // (collide.js reports that, game.js acts on it), and it does not draw —
 // render.js reads these objects and paints them.
 //
-// There is still no explosion atlas (CLAUDE.md §6), so a burst borrows the
-// ENEMY atlas's brightest charge frame as its fireball silhouette. Those frames
-// are already a radial spike-and-glow shape, which is what an explosion wants,
-// and for an enemy death the silhouette is that enemy's OWN row — so the
-// fireball matches the hull colour with no tinting at all. Everything else
-// (core, shock ring, debris streaks) is vector, so it costs no art and stays
-// crisp at any scale. All of it goes through Atlas.drawBurst, so a real
-// explosion atlas would be a manifest change in atlas.js and nothing else.
+// There is still no explosion atlas (CLAUDE.md §6), so a burst borrows an ENEMY
+// atlas's brightest charge frame as its fireball silhouette. Those frames are
+// already a radial spike-and-glow shape, which is what an explosion wants, and
+// for an enemy death the silhouette is that enemy's own row of its own atlas —
+// so the fireball matches the hull colour with no tinting at all. That is why a
+// burst carries `atlas` as well as `row`: an armed hull has to blow up as
+// itself, not as whichever tumbling disc happened to share its row index.
+//
+// Everything else (core, shock ring, debris streaks) is vector, so it costs no
+// art and stays crisp at any scale. All of it goes through Atlas.drawBurst, so a
+// real explosion atlas would be a manifest change in atlas.js and nothing else.
 // ============================================================================
 
 // ---- Tunable burst shape ---------------------------------------------------
@@ -42,6 +45,21 @@ const BOOM_SPIN        = 1.4;  // radians a puff turns over the whole life
 // a screen clearing in a ripple looks better than one clearing in a flash.
 const EXPLOSION_MAX    = 40;
 
+// ---- Tunable impact (the player taking a hit) ------------------------------
+// A hit landing ON the hull, not something being destroyed, so this is small,
+// short and centred on the ship. It has to register in the frame it appears and
+// be gone before the next one lands — at the 1200ms post-hit grace, a burst
+// much longer than this would still be on screen when the player is vulnerable
+// again, which reads as the damage never having stopped.
+const IMPACT_MS  = 300;
+const IMPACT_R   = 13;   // logical px; the hull is 42-46 across, so this is a
+                         // flash on the plating rather than around the ship
+// Which alien silhouette an impact tints. ONE row, not a random one, so the
+// tint cache in atlas.js stays bounded at a single canvas per source colour —
+// and row 1 is the least spiky of the five, which is what a spark on armour
+// wants rather than a starburst.
+const IMPACT_ROW = 1;
+
 // ---- Tunable wreck (the player's death) ------------------------------------
 // The wreck is not one big burst but a stutter of small ones in different
 // colours, which is what reads as a ship coming apart rather than a bomb.
@@ -56,13 +74,16 @@ const WRECK_R_MAX      = 20;
 const WRECK_SPREAD_Y   = 1.3;
 // Which alien silhouette the ship's own two hull colours borrow. Any two rows
 // work; these two are the least spiky, so a tinted copy reads as burning hull
-// rather than as a recoloured alien.
+// rather than as a recoloured alien. Taken from the tumbling atlas because the
+// armed hulls are recognisably SHIPS — a tinted copy of one would read as an
+// enemy exploding next to the player rather than as the player coming apart.
+const WRECK_ATLAS      = 'aliens';
 const WRECK_SHIP_ROWS  = [0, 1];
 
 // Build one burst. `color`/`spark` are "r, g, b" triplets (the COLORS
 // convention — alpha is composed at draw time); `tint` is a CSS colour for
 // recolouring the silhouette, or null to draw the row as authored.
-function makeBurst(x, y, r, row, color, spark, tint, delayMs, life) {
+function makeBurst(x, y, r, atlas, row, color, spark, tint, delayMs, life) {
   const shards = [];
   for (let i = 0; i < BOOM_SHARDS; i++) {
     shards.push({
@@ -78,7 +99,7 @@ function makeBurst(x, y, r, row, color, spark, tint, delayMs, life) {
     });
   }
   return {
-    x, y, r, row, color, spark, tint, shards,
+    x, y, r, atlas, row, color, spark, tint, shards,
     frame: BOOM_FRAME,
     // Two distorted copies of the silhouette. Offsetting, squashing and
     // counter-spinning them is what stops the atlas frame's circular casing
@@ -120,7 +141,7 @@ function pushBurst(list, b) {
 // burst therefore matches the sprite half by construction.
 function explodeEnemy(list, e) {
   const type = ENEMY_TYPES[e.t];
-  const b = makeBurst(e.x, e.y, type.dispW * 0.5, type.row,
+  const b = makeBurst(e.x, e.y, type.dispW * 0.5, type.atlas, type.row,
                       type.color, type.spark, null, 0, BOOM_MS);
   // Sit the main puff on the disc that was there last frame — same row, same
   // angle — so the blast grows out of the enemy rather than snapping to a new
@@ -129,6 +150,32 @@ function explodeEnemy(list, e) {
   b.puffs[0].oy = 0;
   b.puffs[0].rot = e.rot;
   pushBurst(list, b);
+}
+
+// A hit landing on the player, drawn at the ship's own centre.
+//
+// `color`/`spark` are the SOURCE's, never the ship's: the flash is what tells
+// the player what just got them, so a Lancer ramming them flashes red and a
+// lightning bolt flashes yellow. Callers read those off the entity that landed
+// the hit — ENEMY_TYPES for a body, PARTICLE_COLORS for a projectile.
+//
+// Pass null for a source that has no colour of its own and it takes a random
+// entry from the wreck palette instead. That palette rather than a made-up one
+// because it is already a deliberate spread of hues (see data.js), so a random
+// pick still looks chosen; and a random colour rather than a fixed fallback
+// because a fixed one would quietly become "the colour of things we forgot to
+// attribute" and start reading as its own damage type.
+function explodeImpact(list, x, y, color, spark) {
+  if (!color) {
+    const c = WRECK_PALETTE[Math.floor(Math.random() * WRECK_PALETTE.length)];
+    color = c.color;
+    spark = c.spark;
+  }
+  // Tinted, unlike an enemy's death burst: that one borrows its own hull's row
+  // and needs no recolour, but this one is a single shared silhouette standing
+  // in for every source there is.
+  pushBurst(list, makeBurst(x, y, IMPACT_R, WRECK_ATLAS, IMPACT_ROW,
+                            color, spark, rgbCss(color), 0, IMPACT_MS));
 }
 
 // The player's death: many bursts in many colours — the ship's own two hull
@@ -144,7 +191,7 @@ function explodeShip(list, p) {
   // The hull itself goes first, biggest and longest, so the chain reads as one
   // ship blowing up rather than as a cluster of unrelated pops.
   pushBurst(list, makeBurst(
-    p.x, p.y, ship.dispW * 0.5, palette[0].row,
+    p.x, p.y, ship.dispW * 0.5, WRECK_ATLAS, palette[0].row,
     palette[0].color, palette[0].spark, rgbCss(palette[0].color),
     0, WRECK_MS + 140));
 
@@ -158,7 +205,7 @@ function explodeShip(list, p) {
       p.x + Math.cos(a) * d,
       p.y + Math.sin(a) * d * WRECK_SPREAD_Y,
       WRECK_R_MIN + Math.random() * (WRECK_R_MAX - WRECK_R_MIN),
-      c.row, c.color, c.spark, rgbCss(c.color),
+      WRECK_ATLAS, c.row, c.color, c.spark, rgbCss(c.color),
       i * WRECK_STAGGER_MS * (0.6 + Math.random() * 0.8),
       WRECK_MS));
   }
