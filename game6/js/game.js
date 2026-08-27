@@ -426,21 +426,19 @@ const Game = {
           this.startRun();
           e.preventDefault();
         }
-        // The same 1/2/3 that pick difficulty mid-run, now pointed at the
-        // picker that shows the result.
+        // 1/2/3 pick a difficulty. Kept where the mid-run copy of it was not:
+        // this one only reaches a control the player can already see and press,
+        // and it changes nothing that is not shown on screen the instant after.
         if (k >= '1' && k <= '3') this.diffIdx = +k - 1;
         return;
       }
 
-      // Scaffolding until pickups exist: these effects are all meant to arrive
-      // from caught bonuses. Delete with drawControlHints().
-      if (k === 'z') cycleShip(this.player);
-      if (k === 'x') startTurbo(this.player);
-      if (k === 'q') cycleWeapon(this.player);
-      if (k === '[') this.debugDamage();
-      if (k === ']') healPlayer(this.player);
-      // Difficulty belongs on the title screen; 1/2/3 stand in until menu.js.
-      if (k >= '1' && k <= '3') this.diffIdx = +k - 1;
+      // A run takes exactly two inputs from the keyboard: steer, and fire.
+      // Everything else that used to be bound here — ship, weapon, turbo, heal,
+      // damage, difficulty — was scaffolding from before the bonuses and the
+      // title screen existed, and every one of those effects now has a real way
+      // in. Nothing may be added back here that the player cannot also reach by
+      // playing.
       if (k === ' ') {
         this.keys.add(' ');
         e.preventDefault();   // Space scrolls the page otherwise.
@@ -604,16 +602,6 @@ const Game = {
     // Rejects when an embedding page withholds allow="fullscreen" (§5), so the
     // button is simply inert there rather than throwing.
     if (req) { const r = req.call(el); if (r && r.catch) r.catch(() => {}); }
-  },
-
-  // Scaffolding, and the one damage source in the game with no colour of its
-  // own — which makes it the thing that exercises explodeImpact's random pick.
-  // Goes with the rest of the debug keys.
-  debugDamage() {
-    if (this.player.dead) return;
-    const before = this.player.hits;
-    damagePlayer(this.player);
-    if (this.player.hits < before) this.onPlayerHit(null, null);
   },
 
   // A pointer event's type decides whether the player needs a fire button.

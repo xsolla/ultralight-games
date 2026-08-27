@@ -855,8 +855,6 @@ function drawHud(ctx, game) {
 
   drawScore(ctx, game);
   drawHudButtons(ctx, game);
-  drawDifficultyHint(ctx, game);
-  drawControlHints(ctx);
 }
 
 // The header sits on a fade, not a panel. The ship can fly to y=28 and enemies
@@ -1182,33 +1180,7 @@ function drawFullscreenIcon(ctx, cx, cy, s, active) {
   ctx.stroke();
 }
 
-// Scaffolding, parked with the crib sheet rather than in the HUD proper: the
-// difficulty picker belongs on the title screen, and the 1/2/3 keys that change
-// it are documented on the line immediately below this one. It goes when they do.
-function drawDifficultyHint(ctx, game) {
-  ctx.font = `500 10px ${FONT}`;
-  ctx.textAlign = 'left';
-  ctx.textBaseline = 'bottom';
-  ctx.fillStyle = COLORS.hudDim;
-  ctx.fillText('difficulty: ' + DIFFICULTIES[game.diffIdx].label.toUpperCase(),
-               HUD_PAD, CANVAS_H - HUD_PAD - 4 * 13);
-}
-
-// Scaffold-only crib sheet. Delete once the real title screen exists — and with
-// it the debug keys in game.js, since ship/weapon/heal all arrive from caught
-// bonuses in the real game.
-function drawControlHints(ctx) {
-  const lines = [
-    'drag / WASD — steer',
-    'LMB / Space — fire',
-    'Z ship · X turbo · Q weapon',
-    '[ ] — damage / heal · 1 2 3 — difficulty',
-  ];
-  ctx.font = `500 10px ${FONT}`;
-  ctx.textAlign = 'left';
-  ctx.textBaseline = 'bottom';
-  ctx.fillStyle = COLORS.hudDim;
-  lines.forEach((line, i) => {
-    ctx.fillText(line, HUD_PAD, CANVAS_H - HUD_PAD - (lines.length - 1 - i) * 13);
-  });
-}
+// The crib sheet and the difficulty readout that sat below the playfield are
+// both gone, along with the debug keys they documented. The controls the run
+// still takes are taught on the title screen instead, which is where a player
+// reads them once rather than every frame they play.

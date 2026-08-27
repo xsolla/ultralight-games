@@ -143,7 +143,7 @@ function startTurbo(p) {
 // Move to a specific ship, keeping position and turbo state, and carrying the
 // weapon level across a hull with different durability (CLAUDE.md §7).
 //
-// This is what the named-hull bonus calls; cycleShip below is the debug key.
+// This is what the named-hull bonus calls, and now its only caller.
 function setShip(p, idx) {
   if (idx === p.ship) {
     // Catching the hull you are already flying is a no-op, but it still flashes
@@ -169,22 +169,14 @@ function setShip(p, idx) {
   p.animMs = 0;
 }
 
-function cycleShip(p) {
-  setShip(p, (p.ship + 1) % SHIPS.length);
-}
-
 // Swap the weapon id only — `hits`, and so the weapon level, are untouched.
-// This is what the named-weapon bonus calls; cycleWeapon below is the debug key.
+// This is what the named-weapon bonus calls, and now its only caller.
 function setWeapon(p, idx) {
   p.weapon = idx;
   // Abandon any half-emitted volley, or a staggered swap would finish the old
   // weapon's pattern using the new weapon's particle.
   p.volleyLeft = 0;
   p.fireMs = 0;
-}
-
-function cycleWeapon(p) {
-  setWeapon(p, (p.weapon + 1) % WEAPONS.length);
 }
 
 // Tick the gun and append any projectiles fired this frame to `out`.
