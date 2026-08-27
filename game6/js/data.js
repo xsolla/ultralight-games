@@ -719,6 +719,43 @@ const FORMATIONS = [
   { key: 'lariat',  path: 'sideEntry', count: 7, dx: 0,  gap: 0.90, phaseStep: 0, w: 2 },
 ];
 
+// ---- Asteroids -------------------------------------------------------------
+// Indestructible obstacles (CLAUDE.md §7): bullets pass through them, they
+// score nothing and drop nothing, and touching one costs an armour layer and a
+// shove. They are the one hazard in the game that cannot be answered by
+// shooting it, which is the whole reason they are here.
+//
+// This table holds ONLY what differs between the three rocks, and that is
+// colour — the art gives all three the same body radius, and every other
+// property of a rock (its size, its speed, its heading, its spin rate and
+// direction, its animation phase) is rolled per spawn in asteroids.js. That is
+// deliberate rather than lazy: the player reads a rock's threat off its
+// trajectory, and if spin or speed were a property of the colour then the
+// colour would become a tell and three rocks would be three enemies.
+//
+// `color` is the row's MEASURED mean body colour — (81,72,67), (76,42,71),
+// (28,72,98) off the middle frame — scaled up in luminance so it reads against
+// a near-black field. `spark` is the highlight, which for these is the colour of
+// the CRYSTAL inclusions the pulse lights up rather than a whitened body: the
+// crystals are what tells the three rocks apart at a glance, so they are what a
+// strike should flash in. That is the same division PARTICLE_COLORS uses, where
+// `color` is the particle body and `spark` its highlight.
+//
+// Together they tint the impact burst, so a strike flashes in the colour of the
+// rock that landed it, exactly as a rammed hull flashes in its own (§7).
+const ASTEROID_TYPES = [
+  { key: 'grey',    row: 0, color: '150, 133, 124', spark: '255, 178, 82' },
+  { key: 'magenta', row: 1, color: '160, 88, 149',  spark: '232, 138, 255' },
+  { key: 'azure',   row: 2, color: '56, 144, 196',  spark: '120, 240, 255' },
+];
+
+// Ping-pong across the three pulse frames, the same treatment BULLET_FRAMES and
+// ENEMY_FRAMES get and for the same reason: the columns are a monotonic
+// brightening, so a linear 0->2 loop would snap from the brightest state back
+// to the dullest once per cycle. Bouncing back down reads as a rock turning
+// through the light.
+const ASTEROID_FRAMES = [0, 1, 2, 1];
+
 // ---- Difficulties ----------------------------------------------------------
 // Multipliers over the one ramp curve in spawner.js, never separate spawn
 // tables — shaped like the reference game's AI_LEVELS so menu.js can render the

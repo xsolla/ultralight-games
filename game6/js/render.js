@@ -234,6 +234,11 @@ function drawWorld(ctx, game) {
     // Incoming fire goes down FIRST of the two bullet layers, so where the two
     // cross the player's own shots read on top. Both are additive, so the
     // overlap blooms either way; this just decides which colour wins the middle.
+    // Rocks go down FIRST, under everything. They are the only thing on the
+    // field that cannot be destroyed, so nothing should ever be hidden behind
+    // one — an enemy or a bonus lost under a rock would look like a bug in the
+    // thing the player cannot shoot.
+    drawAsteroids(ctx, game.asteroids);
     drawEnemies(ctx, game.enemies);
     // Bubbles under the projectiles: shots pass in FRONT of a bonus, so a
     // firefight never hides the thing the player is trying to steer into.
@@ -350,6 +355,41 @@ function drawEnemies(ctx, enemies) {
 // PLACEHOLDER — vector stand-in so spawning, movement and collision stay
 // testable if the alien atlas fails to load. Centred on the origin like the
 // real sprite, so the spin still reads.
+function drawAsteroids(ctx, asteroids) {
+  const has = Atlas.has('asteroids');
+  for (const a of asteroids) {
+    ctx.save();
+    ctx.translate(a.x, a.y);
+    ctx.rotate(a.rot);
+    if (has) Atlas.drawAsteroid(ctx, ASTEROID_TYPES[a.t].row, asteroidFrame(a), a.w);
+    else drawAsteroidPlaceholder(ctx, a);
+    ctx.restore();
+  }
+}
+
+// PLACEHOLDER — only reached if the atlas fails to load, the way every other
+// sprite in this file degrades. A flat lumpy polygon in the rock's own colour:
+// obviously provisional, and enough to dodge.
+function drawAsteroidPlaceholder(ctx, a) {
+  const r = a.w / 2;
+  const type = ASTEROID_TYPES[a.t];
+  ctx.beginPath();
+  for (let i = 0; i < 9; i++) {
+    const th = (i / 9) * TAU;
+    // A fixed wobble, not a random one: this runs every frame, and a radius
+    // rolled per frame would boil rather than spin.
+    const rr = r * (0.78 + 0.22 * Math.abs(Math.sin(i * 2.4)));
+    const x = Math.cos(th) * rr, y = Math.sin(th) * rr;
+    if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+  }
+  ctx.closePath();
+  ctx.fillStyle = `rgba(${type.color}, 0.85)`;
+  ctx.fill();
+  ctx.lineWidth = 1.5;
+  ctx.strokeStyle = `rgba(${type.spark}, 0.55)`;
+  ctx.stroke();
+}
+
 function drawEnemyPlaceholder(ctx, type) {
   const r = type.dispW * 0.38;
   ctx.strokeStyle = '#c76b8a';

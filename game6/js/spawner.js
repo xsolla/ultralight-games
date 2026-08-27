@@ -48,6 +48,78 @@ const SHOOTER_GAP_MIN  = 4200;   // ...at full ramp
 // spawn half an encounter and the shape would be a lie.
 const SHOOTER_HEADROOM = 12;
 
+// ---- Boss waves ------------------------------------------------------------
+// The one stream driven by SCORE rather than by a clock. Every BOSS_SCORE_STEP
+// points the whole armed roster arrives at once, with rocks in among it — all
+// five set pieces on the field together, which is a thing the ordinary shooter
+// timer can never produce because it deals them out one at a time.
+//
+// Score rather than elapsed time on purpose: it is the one number that already
+// measures how well this run is going, so the encounter lands when the player
+// has earned it rather than when the clock says so. A player being ground down
+// scores slowly and meets fewer of these.
+const BOSS_SCORE_STEP = 500;
+// Every SECOND milestone — 1000, 2000, 3000 — sends two waves back to back
+// instead of one.
+const BOSS_DOUBLE = 2;
+// Beat between the score landing and the wave arriving. Short, but not zero:
+// something this size appearing on the same frame as the point that summoned it
+// reads as a glitch rather than as an arrival.
+const BOSS_LEAD_MS = 700;
+// Gap between the two waves of a double. Deliberately shorter than any of the
+// set pieces takes to cross, so the second lands while the first is still being
+// dealt with — that overlap IS the difference between a double and two singles.
+const BOSS_REPEAT_MS = 4000;
+// Rocks thrown in alongside. Capped by ASTEROID_MAX like any other spawn, so a
+// boss landing on an already-rocky field adds fewer rather than walling the
+// screen off — the encounter is meant to be survivable, not a closed door.
+const BOSS_ASTEROIDS = [2, 3];
+// The ordinary shooter timer is pushed out this far when a boss fires. Without
+// it a routine set piece can arrive in the middle of the encounter, and the
+// boss stops reading as its own event.
+const BOSS_QUIET_MS = 6500;
+
+// How many waves a milestone is worth. Milestone 1 is 500, 2 is 1000, and so on,
+// so the even ones are exactly the thousands.
+function bossWavesFor(milestone) {
+  return milestone % 2 === 0 ? BOSS_DOUBLE : 1;
+}
+
+// Queue `n` waves. Called by game.js the moment the score crosses a milestone;
+// the waves themselves are paced out by updateSpawner below.
+function queueBossWaves(spawn, n) {
+  // Only restart the countdown when nothing is already pending, so a milestone
+  // crossed during a double does not cut the gap between its two waves short.
+  if (spawn.bossQueue <= 0) spawn.bossMs = BOSS_LEAD_MS;
+  spawn.bossQueue += n;
+}
+
+// ---- Asteroid stream -------------------------------------------------------
+// A fourth timer, independent of all three above (CLAUDE.md §7). Its own stream
+// rather than a row in the trickle because a rock is not a kind of enemy: it
+// cannot be shot, so mixing it into a table that the difficulty ramp thickens
+// would mean the late game silts up with obstacles that never clear.
+const ASTEROID_FIRST_MS = 5000;   // grace before the first rock, so the opening
+                                  // seconds are about learning to fly
+// Gaps are long, and got longer when the rocks went to their natural size: one
+// of them is ~95px of body on a 360px field, so two on the same row already
+// halve the corridor. Tuned against the measured mean-on-screen rather than
+// guessed — see the density note below.
+const ASTEROID_GAP_BASE = 7600;   // ms between rocks at t=0
+const ASTEROID_GAP_MIN  = 4100;   // ...at full ramp
+// Rocks enter from the top, or from a side near the top. A field that only ever
+// falls straight at you is one the player learns to sidestep once; one that also
+// crosses is what makes them look before moving.
+const ASTEROID_SIDE_CHANCE = 0.30;
+// Entry and exit depths for a side crossing, as fractions of the canvas height.
+// The GAP between the two bands is what forces a crossing rock to travel most of
+// the field rather than nicking a corner of it: entering by 0.22 at the latest
+// and leaving by 0.70 at the earliest, it covers at least 48% of the height on
+// its worst roll and 96% on its best — on top of the full width, which a side
+// entry crosses by construction.
+const ASTEROID_SIDE_IN  = [0.02, 0.22];
+const ASTEROID_SIDE_OUT = [0.70, 0.98];
+
 // Per-type recipe knobs. Each governs exactly one of the five encounters.
 const MARAUDER_DOWN    = 0.75;  // share of runners that dive rather than climb
 const MARAUDER_PAIR    = 0.45;  // chance a run is two ships rather than one
@@ -313,7 +385,7 @@ function spawnX(typeIdx) {
 // ---- Entry point -----------------------------------------------------------
 // `spawn` is { trickleMs, waveMs } and is the only thing mutated. Appends new
 // enemies to `out`.
-function updateSpawner(spawn, dt, runMs, diff, playerX, out) {
+function updateSpawner(spawn, dt, runMs, diff, playerX, out, rocks) {
   const ramp = spawnRamp(runMs);
 
   // --- Background trickle. Runs the whole time, independent of waves, so the
@@ -358,6 +430,106 @@ function updateSpawner(spawn, dt, runMs, diff, playerX, out) {
       SHOOTER_WAVES[ENEMY_TYPES[idx].key](idx, ramp, diff, playerX, out);
     }
   }
+
+  // --- Boss waves. Not a timer of its own: the queue is filled by score
+  // (game.js), and this only paces out what is already owed.
+  if (spawn.bossQueue > 0) {
+    spawn.bossMs -= dt;
+    if (spawn.bossMs <= 0) {
+      spawn.bossQueue--;
+      spawn.bossMs = BOSS_REPEAT_MS;
+      spawnBossWave(ramp, diff, playerX, out, rocks);
+      // Hold the routine shooter off, so what is on screen for the next few
+      // seconds is the boss and not the boss plus whatever was already due.
+      spawn.shooterMs = Math.max(spawn.shooterMs, BOSS_QUIET_MS);
+    }
+  }
+
+  // --- Asteroids, on a fourth timer of their own. Never aimed at the player:
+  // a rock is weather, and weather that hunts is just a slow enemy.
+  spawn.asteroidMs -= dt;
+  if (spawn.asteroidMs <= 0) {
+    const gap = (ASTEROID_GAP_BASE + (ASTEROID_GAP_MIN - ASTEROID_GAP_BASE) * ramp) /
+                diff.spawnMult;
+    spawn.asteroidMs += gap * (0.7 + Math.random() * 0.6);
+    if (rocks.length < ASTEROID_MAX) rocks.push(rollAsteroid(diff));
+  }
+}
+
+// One boss wave: every armed type at once, plus rocks.
+//
+// Each type arrives through its OWN recipe rather than through some flattened
+// boss formation, which is the whole point — a Harrier still comes in as an
+// arrowhead and a Reaver still comes in as a chain, so the encounter is the five
+// problems the player already knows how to read, all at once, rather than a
+// sixth problem they have never seen. It needs no new geometry for the same
+// reason, and a new armed type joins these waves by existing.
+//
+// They spawn on ONE frame and are not staggered: the five recipes already enter
+// from different edges on different geometry, so they separate themselves
+// without any help, and staggering them would turn "all of them at once" into a
+// queue — which is what the ordinary shooter timer already is.
+function spawnBossWave(ramp, diff, playerX, out, rocks) {
+  for (const idx of SHOOTER_IDX) {
+    // The same headroom the routine shooter keeps, so a boss can never fill the
+    // entity cap and starve the trickle for the rest of the run.
+    if (out.length >= ENEMY_MAX - SHOOTER_HEADROOM) break;
+    SHOOTER_WAVES[ENEMY_TYPES[idx].key](idx, ramp, diff, playerX, out);
+  }
+
+  const n = BOSS_ASTEROIDS[0] +
+            Math.floor(Math.random() * (BOSS_ASTEROIDS[1] - BOSS_ASTEROIDS[0] + 1));
+  for (let i = 0; i < n; i++) {
+    if (rocks.length >= ASTEROID_MAX) break;
+    rocks.push(rollAsteroid(diff));
+  }
+}
+
+// One rock. Every trajectory is built from an entry point AND an exit point,
+// and the heading is simply whatever joins them.
+//
+// That construction is the whole reason a rock now crosses the field instead of
+// clipping a corner of it. A heading rolled directly can point off the near edge
+// a second after the rock arrives, and no cap on the angle fixes that — the
+// angle was never the problem, the unconstrained destination was. Two points
+// that both lie on the field cannot be joined by a line that leaves it in
+// between, so aiming at an exit is a guarantee where a narrower cone was only
+// ever a hope.
+//
+// It also means every rock commits downward by construction: the exit is always
+// below the entry, so the vertical component cannot reach zero and the §7 rule
+// against stalling paths holds without anything having to check it.
+function rollAsteroid(diff) {
+  // The widest rock's half-width, used as the inset for EVERY rock rather than
+  // its own. The size band is 15% wide, so padding them all by the largest costs
+  // a few pixels of entry range and keeps this arithmetic independent of the
+  // mass roll that happens inside makeAsteroid.
+  const pad = ASTEROID_W[1] / 2;
+  const lo = pad;
+  const hi = CANVAS_W - pad;
+
+  if (Math.random() >= ASTEROID_SIDE_CHANCE) {
+    // Top to bottom. BOTH ends are inset from the side edges, so the whole
+    // descent happens on screen and a rock can no longer leave by the edge it
+    // came in beside — which is exactly what made them read as corner traffic.
+    const xIn = lo + Math.random() * (hi - lo);
+    const xOut = lo + Math.random() * (hi - lo);
+    return makeAsteroid(xIn, -SPAWN_ABOVE,
+                        xOut - xIn, CANVAS_H + SPAWN_ABOVE * 2, diff.speedMult);
+  }
+
+  // Side to side, entering high and leaving low, so it crosses the full width
+  // and a third of the height at the very least. Much shallower than a falling
+  // rock — around 40 to 65 degrees off vertical — which is what makes a crossing
+  // read as a different hazard rather than as a leaning descent.
+  const dir = Math.random() < 0.5 ? 1 : -1;   // +1 enters at the left
+  const xIn = dir > 0 ? -SPAWN_BESIDE : CANVAS_W + SPAWN_BESIDE;
+  const xOut = dir > 0 ? CANVAS_W + SPAWN_BESIDE : -SPAWN_BESIDE;
+  const yIn = CANVAS_H * (ASTEROID_SIDE_IN[0] +
+              Math.random() * (ASTEROID_SIDE_IN[1] - ASTEROID_SIDE_IN[0]));
+  const yOut = CANVAS_H * (ASTEROID_SIDE_OUT[0] +
+               Math.random() * (ASTEROID_SIDE_OUT[1] - ASTEROID_SIDE_OUT[0]));
+  return makeAsteroid(xIn, yIn, xOut - xIn, yOut - yIn, diff.speedMult);
 }
 
 function pickFormation() {
@@ -586,4 +758,9 @@ function resetSpawner(spawn) {
   spawn.trickleMs = 400;
   spawn.waveMs = WAVE_FIRST_MS;
   spawn.shooterMs = SHOOTER_FIRST_MS;
+  spawn.asteroidMs = ASTEROID_FIRST_MS;
+  // The boss queue is emptied rather than seeded: it fills from score, and a
+  // fresh run has none.
+  spawn.bossQueue = 0;
+  spawn.bossMs = 0;
 }

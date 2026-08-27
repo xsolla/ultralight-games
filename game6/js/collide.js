@@ -99,6 +99,37 @@ function resolvePlayerHits(player, enemies) {
   return null;
 }
 
+// Resolve asteroids against the ship. Returns the rock that landed the hit, so
+// the caller can flash in its colour, or null.
+//
+// Two things differ from the enemy version above, and both come from a rock
+// being INDESTRUCTIBLE (CLAUDE.md §7). It does not die on the contact, so the
+// only thing stopping it landing a second hit next frame is that the ship is no
+// longer there — which is what the shove is for, and why it is not decoration.
+// And because it survives, the search cannot stop at "the one that died": it
+// takes the FIRST overlap and returns, so one frame costs at most one layer
+// however many rocks are touching.
+//
+// The shove goes through player.js rather than being done here: this file
+// resolves damage, and where a hull ends up is the flight model's business.
+function resolveAsteroidHits(player, asteroids) {
+  if (player.invulnMs > 0 || player.hits <= 0) return null;
+  const pr = playerHitRadius(player);
+
+  for (const a of asteroids) {
+    const ar = asteroidRadius(a);
+    if (!circlesOverlap(player.x, player.y, pr, a.x, a.y, ar)) continue;
+
+    damagePlayer(player);
+    player.invulnMs = PLAYER_INVULN_MS;
+    // Clear by the radii that were just found overlapping, so the separation is
+    // measured against THIS rock rather than against an average one.
+    shovePlayer(player, a.x, a.y, pr + ar);
+    return a;
+  }
+  return null;
+}
+
 // Resolve drifting bonuses against the ship. Returns the ones caught this frame
 // and removes them from the list; game.js applies their effects, the same
 // division of labour the two damage resolvers use.

@@ -44,7 +44,11 @@ const MENU = {
   RULE_Y: 196,           // hairline under the subtitle
   RULE_W: 132,
 
-  SHIP_Y: 282,           // hero hull centre
+  // Centre of the LEAD hull; the wing's other two hang off it (MENU_WING).
+  // Raised from the single-ship layout it replaces, because the flanks sit
+  // lower than the lead and their plumes would otherwise reach the DIFFICULTY
+  // label below.
+  SHIP_Y: 268,
   // 56 against the 42-46 the same hulls fly at. CLAUDE.md §6 caps in-game
   // `dispW` at 48 because that is where the atlas sits at ~1:1 with the backing
   // store, and 56 is the 0.84-0.92x upscale that section names as the first
@@ -106,6 +110,30 @@ const MENU_SKIN = {
   // fill is bright enough that anything lighter loses its edges.
   onText: '#05101c',
 };
+
+// The whole roster on screen at once, flying as a WING rather than standing in
+// a showroom line-up: the hull that will launch leads at the point, and the
+// other two sit out to the sides and BEHIND it. That is the same shape the
+// wingmen bonus flies (wingmen.js), so the title screen opens on a formation
+// the game itself uses.
+//
+// Offsets are from the lead, which is at (CANVAS_W / 2, MENU.SHIP_Y). Slots are
+// ordered BACK TO FRONT — the lead is last so it draws over its own wing.
+//
+// The flanks are smaller as well as further back. Two depth cues rather than
+// one, because at this size a 14px difference on its own reads as "those ships
+// are smaller", not "those ships are further away". At 42 they are also inside
+// CLAUDE.md §6's 48px ceiling and drawing at native scale; only the lead spends
+// the upscale, and its note is on MENU.SHIP_W above.
+//
+// `phase` desynchronises each hull's bob and engine cycle. Three identical
+// plumes flickering in lockstep read as one animation played three times, which
+// is the same reason no two members of a spawned formation share a spin phase.
+const MENU_WING = [
+  { dx: -68, dy: 24, w: 42, glowR: 52, glowA: 0.20, phase: 0.37 },
+  { dx: 68,  dy: 24, w: 42, glowR: 52, glowA: 0.20, phase: 0.71 },
+  { dx: 0,   dy: 0,  w: MENU.SHIP_W, glowR: MENU.SHIP_GLOW_R, glowA: 0.30, phase: 0 },
+];
 
 // ---- Records card ----------------------------------------------------------
 // A modal over whatever it was opened from, centred on both axes. Sized to its
@@ -267,33 +295,51 @@ function drawMenuTraffic(ctx, time) {
   }
 }
 
-// The hull the next run will start on, flying in place: engine cycling, hull
-// bobbing, its own accent colour bloomed behind it so it reads as lit rather
-// than pasted onto the backdrop.
+// The whole roster, flying the wing laid out in MENU_WING.
 //
-// START_SHIP, not game.player.ship — the player object still holds whatever
-// hull the LAST run ended on, so drawing from it would show a ship the START
-// button is not going to give you. The two read the same constant so the title
-// screen cannot promise one hull and hand over another.
+// Which hull takes which slot is DERIVED, not listed: the lead is always the
+// one START will launch and the flanks are whatever else the roster holds, so
+// the same hull can never appear in two slots and this survives START_SHIP
+// changing. The lead is START_SHIP rather than game.player.ship for the reason
+// that constant exists — the player object still holds whatever hull the LAST
+// run ended on, and drawing from it would show a ship START is not going to
+// give you.
 function drawMenuHero(ctx, game) {
   if (!Atlas.has('ships')) return;
-  const idx = START_SHIP;
-  const s = game.time / 1000;
-  const y = MENU.SHIP_Y + MENU.SHIP_BOB * Math.sin(s * TAU * MENU.SHIP_BOB_HZ);
+
+  const flanks = [];
+  for (let i = 0; i < SHIPS.length; i++) if (i !== START_SHIP) flanks.push(i);
+
+  for (let i = 0; i < MENU_WING.length; i++) {
+    const lead = i === MENU_WING.length - 1;
+    const ship = lead ? START_SHIP : flanks[i];
+    // Fewer hulls in the roster than slots in the wing: leave the slot empty
+    // rather than repeating a hull to fill it.
+    if (ship === undefined) continue;
+    drawMenuShip(ctx, game.time, ship, MENU_WING[i]);
+  }
+}
+
+// One hull of the wing: its accent colour bloomed behind it so it reads as lit
+// rather than pasted onto the backdrop, then the hull itself.
+//
+// The idle flight cycle is driven off Game.time rather than a player's animMs:
+// these are pictures, not entities, and have no state of their own.
+function drawMenuShip(ctx, time, shipIdx, slot) {
+  const x = CANVAS_W / 2 + slot.dx;
+  const y = MENU.SHIP_Y + slot.dy + MENU.SHIP_BOB *
+            Math.sin(((time / 1000) * MENU.SHIP_BOB_HZ + slot.phase) * TAU);
 
   ctx.save();
   ctx.globalCompositeOperation = 'lighter';
-  ctx.globalAlpha = 0.30;
-  ctx.drawImage(glowSprite(SHIPS[idx].color, GLOW_BLOOM),
-                CANVAS_W / 2 - MENU.SHIP_GLOW_R, y - MENU.SHIP_GLOW_R,
-                MENU.SHIP_GLOW_R * 2, MENU.SHIP_GLOW_R * 2);
+  ctx.globalAlpha = slot.glowA;
+  ctx.drawImage(glowSprite(SHIPS[shipIdx].color, GLOW_BLOOM),
+                x - slot.glowR, y - slot.glowR, slot.glowR * 2, slot.glowR * 2);
   ctx.restore();
 
-  // The idle flight cycle, driven off Game.time rather than a player's animMs:
-  // the menu's ship is a picture, not an entity, and has no state of its own.
   const seq = FLIGHT_FRAMES.normal;
-  const frame = seq[Math.floor(game.time / ANIM.SHIP_FRAME_MS) % seq.length];
-  Atlas.drawShip(ctx, idx, frame, CANVAS_W / 2, y, MENU.SHIP_W);
+  const step = Math.floor(time / ANIM.SHIP_FRAME_MS + slot.phase * seq.length);
+  Atlas.drawShip(ctx, shipIdx, seq[step % seq.length], x, y, slot.w);
 }
 
 function drawMenuTitle(ctx, time) {

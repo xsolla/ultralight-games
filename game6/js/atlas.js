@@ -21,6 +21,7 @@ const ATLAS_SOURCES = {
   bullets: 'assets/sprites/projectiles_atlas.png',
   aliens: 'assets/sprites/alien_noshoot_atlas.png',
   shooters: 'assets/sprites/alien_shoot_atlas.png',
+  asteroids: 'assets/sprites/asteroid_sprite_atlas.png',
 };
 
 // ---- Ship frame manifest (measured from the atlas alpha channel) -----------
@@ -113,6 +114,46 @@ const ENEMY_BOX = 204;
 // in below.
 const ENEMY_DISC_FRAC = 0.76;
 
+// ---- Asteroid frame manifest (measured from the alpha channel) -------------
+// asteroid_sprite_atlas.png: 1024x1024, 3 columns x 3 rows.
+//   Rows are the three rocks — grey/tan, magenta, azure.
+//   Columns are a brightening PULSE, not a rotation. Both mean body colour and
+//   content radius climb monotonically across every row (r90 of 130/131/139,
+//   130/141/142, 132/133/144), exactly as the two alien atlases do. So the
+//   frames animate the light on a rock and every bit of TURNING is ctx.rotate
+//   at draw time — which is why these boxes are centre-anchored like the
+//   enemies' and not edge-anchored like the ships'.
+//
+// This is the one atlas in the game where the naive grid is also the correct
+// one, and it was measured before being trusted: the alpha-weighted centroids
+// sit within 1.3px of an even 341.33 thirds grid on both axes (x measured
+// 169.9-170.8 / 511.8-512.8 / 852.7-853.6, y 169.7-170.6 / 510.3-510.9 /
+// 852.3-852.6), and every cell's content bbox falls inside its own grid cell.
+// At the ~30-58 logical px these draw at, 1.3 source px is under 0.25 logical
+// px — nothing like the 8px centroid walk that forced per-cell anchors on the
+// no-shoot atlas (CLAUDE.md §6). Re-measure if the atlas is re-exported.
+//
+// STRAIGHT alpha, unlike BOTH alien atlases: 1651 of its 7504 partial-alpha
+// pixels carry a channel above their own alpha, which premultiplied art cannot
+// do. So it composites as authored and none of §6's premultiplied caveats
+// apply to it — including the one about a lighter backdrop.
+const ASTEROID_CELLS = [0, 341, 683];
+const ASTEROID_BOX = 341;
+
+// Solid-body radius as a fraction of the half-box, for collision.
+//
+// Measured off frame 0 of each row — the un-pulsed frame, i.e. the rock without
+// its glow. An alpha-weighted 90th-percentile radius of 130.0/130.0/131.6
+// implies a filled-disc radius of ~137-139 (for a disc, r90 = sqrt(0.9) * R),
+// which is 0.80-0.81 of the 170.5 half-box. All three rows agree to within
+// 0.01, so one constant serves them the way ENEMY_DISC_FRAC serves the tumbling
+// discs rather than each row carrying its own like the armed hulls.
+//
+// Taking it from frame 0 rather than averaging the pulse leaves the hitbox just
+// inside the art at the peak of the glow, which is the forgiving direction for
+// something whose whole job is to be dodged.
+const ASTEROID_DISC_FRAC = 0.80;
+
 const Atlas = {
   imgs: {},         // key -> decoded HTMLImageElement; absent if that load failed
   ready: false,     // every source has settled, loaded or not
@@ -198,6 +239,26 @@ const Atlas = {
       ENEMY_CELLS[frame], ENEMY_CELLS[row], ENEMY_BOX, ENEMY_BOX,
       -dispW / 2, -dispW / 2, dispW, dispW
     );
+  },
+
+  // Draw asteroid `row` frame `frame` in the CURRENT transform, centred on the
+  // origin, `dispW` logical px across. The caller has already translated to the
+  // rock and applied its spin, so the centre anchor means it turns about its own
+  // axis rather than swinging around one.
+  drawAsteroid(ctx, row, frame, dispW) {
+    const img = this.imgs.asteroids;
+    if (!img) return;
+    ctx.drawImage(
+      img,
+      ASTEROID_CELLS[frame], ASTEROID_CELLS[row], ASTEROID_BOX, ASTEROID_BOX,
+      -dispW / 2, -dispW / 2, dispW, dispW
+    );
+  },
+
+  // Collision radius for a rock drawn `dispW` across. One fraction for all
+  // three rows — see the note on ASTEROID_DISC_FRAC.
+  asteroidHitRadius(dispW) {
+    return (dispW / 2) * ASTEROID_DISC_FRAC;
   },
 
   // Collision radius for an enemy drawn `dispW` across — the solid hull, not

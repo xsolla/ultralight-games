@@ -123,6 +123,8 @@ const Game = {
   // other. Filtering one array per test would cost more than keeping two.
   enemyBullets: [],
   enemies: [],          // live enemies, armed and unarmed alike
+  asteroids: [],        // indestructible obstacles; on their own list because
+                        // nothing that reads enemies ever wants one
   pickups: [],          // drifting bonus bubbles waiting to be caught
   wingmen: [],          // the escort, while a wing bonus is running
   explosions: [],       // live death bursts, purely decorative
@@ -132,6 +134,10 @@ const Game = {
   // reads its phase straight off it.
   scoreMs: 0,
   scorePopMs: 0,        // counts down; drives the number's pop on a gain
+  // Highest BOSS_SCORE_STEP milestone this run has crossed. Kept as the reached
+  // index rather than as "points since the last one" so a single gain that
+  // vaults a milestone still fires it exactly once.
+  bossMilestone: 0,
   // The run's result, frozen the instant the run ended. `newRank` is the row it
   // took in the table, or -1 for a run that did not make it — which is what
   // decides whether there is a card to show at all.
@@ -153,8 +159,9 @@ const Game = {
   shakeTotalMs: 0,
   shakeMag: 0,
   diffIdx: 1,           // index into DIFFICULTIES; 'normal' until menu.js exists
-  // Spawner timers — one per stream. It holds no state of its own.
-  spawn: { trickleMs: 0, waveMs: 0, shooterMs: 0 },
+  // Spawner state — one countdown per stream, plus the boss queue, which is
+  // filled by score rather than by a clock. spawner.js holds none of its own.
+  spawn: { trickleMs: 0, waveMs: 0, shooterMs: 0, asteroidMs: 0, bossMs: 0, bossQueue: 0 },
 
   // ---- HUD ----
   soundState: 'on',     // 'on' | 'musicoff' | 'off'; see SOUND_CYCLE
@@ -213,12 +220,14 @@ const Game = {
     this.bullets.length = 0;
     this.enemyBullets.length = 0;
     this.enemies.length = 0;
+    this.asteroids.length = 0;
     this.pickups.length = 0;
     this.wingmen.length = 0;
     this.explosions.length = 0;
     this.score = 0;
     this.scoreMs = 0;
     this.scorePopMs = 0;
+    this.bossMilestone = 0;
     this.runOver = false;
     this.finalScore = 0;
     this.newRank = -1;
@@ -460,6 +469,21 @@ const Game = {
   addScore(n) {
     this.score += n;
     this.scorePopMs = SCORE_POP_MS;
+
+    // Boss milestones. Checked HERE, in the funnel every gain already passes
+    // through, for the same reason the pop is: a future source of points cannot
+    // forget to trigger one.
+    //
+    // Guarded on runOver because the score keeps climbing after the ship is
+    // wrecked — shots already in flight go on killing things — and a run whose
+    // result is fixed should not still be summoning encounters into its own
+    // wreckage.
+    if (this.runOver) return;
+    const milestone = Math.floor(this.score / BOSS_SCORE_STEP);
+    if (milestone > this.bossMilestone) {
+      this.bossMilestone = milestone;
+      queueBossWaves(this.spawn, bossWavesFor(milestone));
+    }
   },
 
   // ---- Bonuses ------------------------------------------------------------
@@ -671,8 +695,10 @@ const Game = {
     // player's own trigger — so it follows the same move-then-fire ordering.
     updateWingmen(this.wingmen, dt, this.player, this.isFiring(), this.bullets);
 
-    updateSpawner(this.spawn, dt, this.runMs, diff, this.player.x, this.enemies);
+    updateSpawner(this.spawn, dt, this.runMs, diff, this.player.x,
+                  this.enemies, this.asteroids);
     updateEnemies(this.enemies, dt);
+    updateAsteroids(this.asteroids, dt);
     // Enemy guns run after their hulls have moved, for the same reason the
     // player's does above. This also steers the one type that steers, which is
     // why it comes after updateEnemies rather than before: that call is what
@@ -724,6 +750,15 @@ const Game = {
       // together in the same hue and read as one collision rather than two
       // unrelated events.
       const t = ENEMY_TYPES[rammed.t];
+      this.onPlayerHit(t.color, t.spark);
+    }
+
+    // Rocks resolve after the enemies, so a frame that could go either way
+    // spends its one armour layer on the thing that dies for it. The rock is
+    // indestructible and will still be there next frame; the enemy will not.
+    const struck = resolveAsteroidHits(this.player, this.asteroids);
+    if (struck) {
+      const t = ASTEROID_TYPES[struck.t];
       this.onPlayerHit(t.color, t.spark);
     }
 
