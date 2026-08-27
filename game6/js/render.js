@@ -74,7 +74,8 @@ const HUD_BTN = {
 // Order is fixed by branding.md §2: sound, exit, fullscreen, left to right.
 const HUD_BTN_IDS = ['sound', 'exit', 'fullscreen'];
 
-// The title screen carries the same row minus exit, whose job in branding.md §2
+// The title screen and the records card carry the same row minus exit, whose
+// job in branding.md §2
 // is "return to the title screen" — which is where the player already is, so it
 // would be a button that does nothing. game2 drops it there for the same reason
 // (branding.md §6). Order and appearance are untouched.
@@ -89,8 +90,11 @@ const MENU_BTN_IDS = ['sound', 'fullscreen'];
 // Which of the shared buttons a screen offers. One function so the painter and
 // game.js's hit test can never disagree about what is on screen — the same
 // contract hudButtonRects itself exists for, one level up.
+// The records card gets the menu's row too, whichever screen it opened over: it
+// carries its own way out ("Title", or "OK"), so an exit button beside those
+// would be a second, differently-labelled copy of one of them.
 function hudButtonIds(screen) {
-  return screen === 'menu' ? MENU_BTN_IDS : HUD_BTN_IDS;
+  return (screen === 'menu' || screen === 'records') ? MENU_BTN_IDS : HUD_BTN_IDS;
 }
 
 // LAYOUT DEVIATION, in the terms branding.md §6 asks for. The spec is a vertical
@@ -195,7 +199,22 @@ function drawScene(ctx, game) {
     drawMenu(ctx, game);
     return;
   }
+  // The records card paints its own backdrop, because which one that is depends
+  // on where it was opened from — the title screen, or the run it is reporting.
+  if (game.screen === 'records') {
+    drawRecords(ctx, game);
+    return;
+  }
 
+  drawWorld(ctx, game);
+  if (Atlas.ready) drawHud(ctx, game);
+  else drawLoading(ctx);
+}
+
+// The playfield and everything in it, shake included. Split out of drawScene so
+// the records card can paint the finished run behind itself — the picture of
+// how the run ended is part of what the card is reporting.
+function drawWorld(ctx, game) {
   const shake = shakeOffset(game);
   ctx.save();
   if (shake) ctx.translate(shake.x, shake.y);
@@ -234,14 +253,13 @@ function drawScene(ctx, game) {
     drawExplosions(ctx, game.explosions);
   }
   ctx.restore();
-
-  // The HUD never shakes — and not only because a shaking HUD is unreadable.
-  // hudButtonRects() is a pure function of constants, so if the buttons moved
-  // under the transform then what the player taps would stop being what was
-  // drawn, which is the exact drift that function exists to rule out.
-  if (Atlas.ready) drawHud(ctx, game);
-  else drawLoading(ctx);
 }
+
+// The HUD never shakes — and not only because a shaking HUD is unreadable.
+// hudButtonRects() is a pure function of constants, so if the buttons moved
+// under the transform then what the player taps would stop being what was
+// drawn, which is the exact drift that function exists to rule out. That is why
+// it is drawn by the caller, outside drawWorld's transform, rather than inside.
 
 // Current shake displacement in logical px, or null when nothing is shaking.
 // Pure: game.js owns the countdown, this only shapes it.

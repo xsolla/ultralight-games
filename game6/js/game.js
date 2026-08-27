@@ -101,10 +101,15 @@ const BONUS_EFFECTS = {
 };
 
 const Game = {
-  // 'menu' | 'playing'. The rest of CLAUDE.md §5's list — shipselect, paused,
-  // gameover, records — are not built yet; each arrives as a branch here, in
-  // update() and in drawScene(), and nothing else has to learn about it.
+  // 'menu' | 'playing' | 'records'. The rest of CLAUDE.md §5's list —
+  // shipselect, paused, gameover — are not built yet; each arrives as a branch
+  // here, in update() and in drawScene(), and nothing else has to learn of it.
+  //
+  // 'records' absorbed the gameover card: one card reports the run AND shows
+  // the table, rather than a card that says how you did followed by a screen
+  // that says the same thing in a list.
   screen: 'menu',
+  recordsFrom: 'menu',  // 'menu' | 'gameover' — backdrop, heading and buttons
   canvas: null,
   ctx: null,
   lastTime: 0,
@@ -127,6 +132,17 @@ const Game = {
   // reads its phase straight off it.
   scoreMs: 0,
   scorePopMs: 0,        // counts down; drives the number's pop on a gain
+  // The run's result, frozen the instant the run ended. `newRank` is the row it
+  // took in the table, or -1 for a run that did not make it — which is what
+  // decides whether there is a card to show at all.
+  //
+  // Frozen rather than read later because the score is still LIVE after the
+  // ship is wrecked: bullets already in flight keep travelling and can still
+  // kill things while the wreck burns, so a number read when the explosion
+  // finishes is not the number the player died on.
+  runOver: false,
+  finalScore: 0,
+  newRank: -1,
   runMs: 0,             // elapsed run time — the difficulty ramp's only input
   deathMs: 0,           // time since the ship was wrecked; drives the restart
   // Screen shake. `shakeTotalMs` is kept alongside the countdown so the decay
@@ -180,6 +196,7 @@ const Game = {
     Stars.init();
     Rays.init();
     Bokeh.init();
+    Scores.init();
     // A run is built up front even though the title screen is what opens, so
     // every reader of Game.player has something to read before the first START.
     this.resetRun(START_SHIP);
@@ -202,6 +219,9 @@ const Game = {
     this.score = 0;
     this.scoreMs = 0;
     this.scorePopMs = 0;
+    this.runOver = false;
+    this.finalScore = 0;
+    this.newRank = -1;
     this.runMs = 0;
     this.deathMs = 0;
     this.shakeMs = 0;
@@ -236,6 +256,41 @@ const Game = {
     this.hudCapture = false;
   },
 
+  // Open the records card over whatever is on screen now. `from` is 'menu' when
+  // the title screen asked for it and 'gameover' when a run just ended, and it
+  // is the only thing that differs between the two: same table, same card.
+  openRecords(from) {
+    this.screen = 'records';
+    this.recordsFrom = from;
+    this.menuHover = null;
+    this.hudHover = null;
+    this.hudCapture = false;
+  },
+
+  // Freeze the run's score and enter it in the table. Called at the INSTANT the
+  // run ends — the frame the ship is wrecked, or the press of the exit button —
+  // never when the wreck finishes burning, because the score is still moving in
+  // between (see the note on runOver).
+  //
+  // Guarded so it can only happen once per run: pressing exit while the wreck
+  // is still burning must not enter the same run twice.
+  fixScore() {
+    if (this.runOver) return;
+    this.runOver = true;
+    this.finalScore = this.score;
+    this.newRank = Scores.submit(DIFFICULTIES[this.diffIdx].key, this.score);
+  },
+
+  // Where a finished run goes: the card, always. It used to open only for a
+  // run that made the table, which left an ordinary run with no way to replay
+  // without crossing the title screen first — and replaying is the thing a
+  // player wants most at exactly that moment. The card reads as a result rather
+  // than a celebration when there is no record; `newRank` of -1 is what it
+  // reads to tell the difference, so nothing here has to say which it is.
+  afterRun() {
+    this.openRecords('gameover');
+  },
+
   // ---- Canvas -------------------------------------------------------------
   // The element is CSS-sized by styles.css; the backing store is sized to the
   // real device pixels it covers so HUD text and vector art stay crisp.
@@ -265,11 +320,14 @@ const Game = {
       const over = hudButtonAt(p.x, p.y, this.screen);
       this.hudHover = over;
 
-      // The title screen has no ship to steer, so the whole pointer path is
-      // just hover. A HUD button wins over a menu button beneath it, the same
-      // precedence the press below uses.
-      if (this.screen === 'menu') {
-        this.menuHover = over ? null : menuButtonAt(p.x, p.y);
+      // Neither the title screen nor the records card has a ship to steer, so
+      // the whole pointer path is just hover. A HUD button wins over a screen
+      // button beneath it, the same precedence the press below uses.
+      //
+      // Both share menuHover: they are never on screen at once, so one field
+      // cannot be ambiguous and two would only give them a chance to disagree.
+      if (this.screen === 'menu' || this.screen === 'records') {
+        this.menuHover = over ? null : this.screenButtonAt(p.x, p.y);
         this.canvas.style.cursor = (over || this.menuHover) ? 'pointer' : 'default';
         return;
       }
@@ -308,14 +366,16 @@ const Game = {
         return;
       }
 
-      // The title screen returns either way, pressed or not: there is nothing
-      // behind its buttons to steer or fire, so a tap on the backdrop is not an
-      // input that has been missed.
-      if (this.screen === 'menu') {
-        const m = menuButtonAt(p.x, p.y);
-        if (m) {
-          this.menuHover = m;
-          this.pressMenuButton(m);
+      // Both non-run screens return either way, pressed or not: there is
+      // nothing behind their buttons to steer or fire, so a tap on the backdrop
+      // is not an input that has been missed. On the records card that is also
+      // what makes it MODAL — a press outside it reaches nothing, including the
+      // title screen still visible underneath.
+      if (this.screen === 'menu' || this.screen === 'records') {
+        const b = this.screenButtonAt(p.x, p.y);
+        if (b) {
+          this.menuHover = b;
+          this.pressScreenButton(b);
         }
         return;
       }
@@ -337,6 +397,18 @@ const Game = {
     window.addEventListener('keydown', (e) => {
       if (e.repeat) return;
       const k = e.key.toLowerCase();
+
+      // The records card's keys. Enter takes the primary button — the one the
+      // card already shows as primary — and Escape always leaves.
+      if (this.screen === 'records') {
+        if (k === 'enter' || k === ' ') {
+          this.pressRecordsButton(this.recordsFrom === 'menu' ? 'ok' : 'retry');
+          e.preventDefault();
+        } else if (k === 'escape') {
+          this.pressRecordsButton(this.recordsFrom === 'menu' ? 'ok' : 'title');
+        }
+        return;
+      }
 
       // The title screen's own keys, and an early return so none of the
       // run-only keys below can fire at a ship that is not flying yet.
@@ -434,8 +506,27 @@ const Game = {
   // through the wreck instead, because there was no title to return to; now
   // that menu.js exists it does what the spec says, and abandoning a run is no
   // longer dressed up as dying in one.
+  //
+  // The score still counts. Leaving early is a decision about the run, not a
+  // way of not having played it, so it is fixed and entered exactly as a death
+  // is — and a run good enough to make the table gets its card either way.
   endRun() {
-    this.toMenu();
+    this.fixScore();
+    this.afterRun();
+  },
+
+  // Which of the CURRENT screen's own buttons is under a point. One entry
+  // point, so the hover path and the press path can never end up testing two
+  // different layouts.
+  screenButtonAt(px, py) {
+    return this.screen === 'records'
+      ? recordsButtonAt(px, py, this.recordsFrom)
+      : menuButtonAt(px, py);
+  },
+
+  pressScreenButton(id) {
+    if (this.screen === 'records') this.pressRecordsButton(id);
+    else this.pressMenuButton(id);
   },
 
   // One press on the title screen. Here rather than in menu.js for the same
@@ -446,17 +537,26 @@ const Game = {
       this.startRun();
       return;
     }
-    // Drawn, hoverable and pressable, but inert: the high-score popup it opens
-    // needs js/scores.js, still a planned slot in CLAUDE.md §3. It is on the
-    // screen rather than held back so the title's layout is the final one and
-    // adding the popup moves nothing.
-    if (id === 'records') return;
+    // The same card the end of a run raises, opened as a plain look at the
+    // table — no run to report, so no row is emphasised and there is nowhere
+    // to go but back.
+    if (id === 'records') {
+      this.openRecords('menu');
+      return;
+    }
 
     // Difficulty. Dispatched on the rect's own `kind`/`i` rather than by
     // parsing the id, so the ids stay opaque strings and a new row in
     // DIFFICULTIES needs no change here at all.
     const r = menuButtonRects().find((b) => b.id === id);
     if (r && r.kind === 'diff') this.diffIdx = r.i;
+  },
+
+  // 'retry' starts another run; 'title' and 'ok' are the same destination
+  // wearing the label its context calls for.
+  pressRecordsButton(id) {
+    if (id === 'retry') this.startRun();
+    else this.toMenu();
   },
 
   // Read live rather than tracked, so leaving by Esc or F11 keeps the glyph in
@@ -542,6 +642,17 @@ const Game = {
     if (this.screen === 'menu') {
       Stars.update(dt, 1);
       Bokeh.update(dt);
+      return;
+    }
+
+    // The card over the title keeps the title alive behind it. The card over a
+    // finished run does not: the score is fixed, and so is the picture of how
+    // it was earned.
+    if (this.screen === 'records') {
+      if (this.recordsFrom === 'menu') {
+        Stars.update(dt, 1);
+        Bokeh.update(dt);
+      }
       return;
     }
 
@@ -653,16 +764,16 @@ const Game = {
     if (this.player.hits <= 0 && killPlayer(this.player)) {
       explodeShip(this.explosions, this.player);
       this.shake(SHAKE_DEATH_MS, SHAKE_DEATH_MAG);
+      // The score is taken HERE, on the frame of the wreck, and only shown once
+      // the wreck has finished burning below.
+      this.fixScore();
     }
     if (!this.player.dead) return;
 
     this.deathMs += dt;
-    // The wreck burns, then the title comes back. Still short of the full §7
-    // flow — that is game-over card -> title -> records, and the card and the
-    // records screen both need scores.js — but the run no longer restarts
-    // itself behind the player, which it did only because there was nowhere
-    // else for it to go.
-    if (this.deathMs >= RESPAWN_MS) this.toMenu();
+    // The wreck burns, then the run reports itself: the records card if it
+    // earned one, the title if it did not.
+    if (this.deathMs >= RESPAWN_MS) this.afterRun();
   },
 };
 

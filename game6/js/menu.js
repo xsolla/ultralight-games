@@ -8,9 +8,12 @@
 // ambiance.js's, the hull sprites are atlas.js's, and the three shared HUD
 // buttons are render.js's. What lives here is this screen's composition.
 //
-// The ship-select and records screens named for this file in CLAUDE.md §3 are
-// not built yet. The records BUTTON is, and is inert — see the note in
-// game.js's pressMenuButton.
+// It also owns the RECORDS CARD, the modal §3 names for this file. One card
+// serves both of the places it is opened from — the end of a run and the title
+// screen — differing only in its backdrop, its heading and its buttons, because
+// it is showing the same table either way.
+//
+// Ship select, the last screen §3 names here, is still not built.
 // ============================================================================
 
 // ---- Layout ----------------------------------------------------------------
@@ -102,6 +105,31 @@ const MENU_SKIN = {
   // Text ON a filled surface. Near-black rather than the background colour: the
   // fill is bright enough that anything lighter loses its edges.
   onText: '#05101c',
+};
+
+// ---- Records card ----------------------------------------------------------
+// A modal over whatever it was opened from, centred on both axes. Sized to its
+// contents rather than to the screen: it is a card, and a card that reached the
+// edges would be a screen wearing a border.
+const RECORDS = {
+  W: 272,
+  H: 244,
+  RADIUS: 14,
+  PAD: 18,
+  HEAD_Y: 30,        // all offsets are from the card's own top edge
+  DIFF_Y: 50,
+  RULE_Y: 64,
+  ROW_Y: 78,
+  ROW_H: 32,
+  ROW_GAP: 2,
+  BTN_Y: 186,
+  BTN_H: 40,
+  BTN_GAP: 12,
+  ONE_BTN_W: 140,    // the title screen's single OK
+  // How far the backdrop is knocked back. Enough that the card is unambiguously
+  // in front, not so much that the run behind it is erased — seeing where you
+  // died is half of what makes the number mean anything.
+  SCRIM: 'rgba(4, 8, 16, 0.72)',
 };
 
 const MENU_TITLE = 'SPACE';
@@ -379,6 +407,226 @@ function drawMenuHint(ctx) {
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   ctx.fillText(MENU_HINT, CANVAS_W / 2, MENU.HINT_Y);
+}
+
+// ---- Records card ----------------------------------------------------------
+// Same pure-layout contract as the two above: derived from constants, never
+// stored, so nothing outlives the screen that drew it.
+//
+// `from` decides the buttons, and it is passed in rather than read off Game so
+// this stays a pure function of its arguments — the same reason hudButtonRects
+// takes the screen.
+function recordsCardRect() {
+  return {
+    x: (CANVAS_W - RECORDS.W) / 2,
+    y: (CANVAS_H - RECORDS.H) / 2,
+    w: RECORDS.W,
+    h: RECORDS.H,
+  };
+}
+
+function recordsButtonRects(from) {
+  const card = recordsCardRect();
+  const y = card.y + RECORDS.BTN_Y;
+  const h = RECORDS.BTN_H;
+
+  // Opened from the title, the card is pure information: there is nowhere to go
+  // but back, so one button says so and is not dressed up as a choice.
+  if (from === 'menu') {
+    return [{
+      id: 'ok', label: 'OK', primary: true,
+      x: (CANVAS_W - RECORDS.ONE_BTN_W) / 2, y, w: RECORDS.ONE_BTN_W, h,
+    }];
+  }
+
+  // At the end of a run there IS a choice, and the two are not equal weight:
+  // "Try again" is what most players want next, so it takes the primary
+  // surface and the right-hand side, where the thumb already is.
+  const inner = RECORDS.W - RECORDS.PAD * 2;
+  const w = (inner - RECORDS.BTN_GAP) / 2;
+  return [
+    { id: 'title', label: 'TITLE', primary: false, x: card.x + RECORDS.PAD, y, w, h },
+    { id: 'retry', label: 'TRY AGAIN', primary: true,
+      x: card.x + RECORDS.PAD + w + RECORDS.BTN_GAP, y, w, h },
+  ];
+}
+
+function recordsButtonAt(px, py, from) {
+  const k = MENU_BTN_SLOP;
+  for (const r of recordsButtonRects(from)) {
+    if (px >= r.x - k && px <= r.x + r.w + k &&
+        py >= r.y - k && py <= r.y + r.h + k) return r.id;
+  }
+  return null;
+}
+
+function drawRecords(ctx, game) {
+  // The backdrop is whatever the card was opened over. The title screen keeps
+  // drifting behind it; a finished run is frozen, which is the picture of how
+  // it ended and is exactly what should not move while its score is read.
+  if (game.recordsFrom === 'menu') {
+    drawMenu(ctx, game);
+  } else {
+    drawWorld(ctx, game);
+    if (Atlas.ready) drawHud(ctx, game);
+  }
+
+  ctx.fillStyle = RECORDS.SCRIM;
+  ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
+
+  drawRecordsCard(ctx, game);
+
+  // Re-drawn on top of the scrim. branding.md §2 requires the shared buttons to
+  // stay live over a game-over dialog, and the backdrop's own copy of them is
+  // now behind the knock-back.
+  drawHudButtons(ctx, game);
+}
+
+function drawRecordsCard(ctx, game) {
+  const card = recordsCardRect();
+  const fromRun = game.recordsFrom !== 'menu';
+  // The card opens for EVERY finished run, so which of the two things it is
+  // saying has to be read off the result rather than assumed from the context.
+  const newRecord = fromRun && game.newRank >= 0;
+  const diff = DIFFICULTIES[game.diffIdx];
+  const table = Scores.table(diff.key);
+
+  ctx.save();
+  ctx.shadowColor = 'rgba(0, 0, 0, 0.65)';
+  ctx.shadowBlur = 26;
+  roundRectPath(ctx, card.x, card.y, card.w, card.h, RECORDS.RADIUS);
+  ctx.fillStyle = 'rgba(9, 18, 34, 0.96)';
+  ctx.fill();
+  ctx.restore();
+
+  roundRectPath(ctx, card.x, card.y, card.w, card.h, RECORDS.RADIUS);
+  ctx.lineWidth = 1;
+  ctx.strokeStyle = MENU_SKIN.stroke;
+  ctx.stroke();
+
+  ctx.textBaseline = 'middle';
+
+  // The heading is the news. Only a record earns the accent colour and the
+  // word: a run that missed the table gets a plain statement in plain text,
+  // because congratulating every run is how the phrase stops meaning anything.
+  const heading = !fromRun ? 'HIGH SCORES'
+                : newRecord ? 'NEW HIGH SCORE'
+                : 'GAME OVER';
+  ctx.font = `800 15px ${FONT}`;
+  ctx.fillStyle = newRecord ? MENU_SKIN.accent : COLORS.hudText;
+  drawTracked(ctx, heading, CANVAS_W / 2, card.y + RECORDS.HEAD_Y, 2.6);
+
+  // Which table this is. Not decoration: the tables are per difficulty, so a
+  // score that is a record here would not be one on the setting next to it.
+  //
+  // The run's own score joins it only when the table does not already show it.
+  // A record is legible in its emphasised row a few pixels below, and the same
+  // number printed twice on one small card invites the reader to look for the
+  // difference between them.
+  ctx.font = `700 9px ${FONT}`;
+  ctx.fillStyle = COLORS.hudDim;
+  const sub = diff.label.toUpperCase() +
+              (fromRun && !newRecord ? ' · ' + game.finalScore : '');
+  drawTracked(ctx, sub, CANVAS_W / 2, card.y + RECORDS.DIFF_Y, 2.2);
+
+  const ruleW = card.w - RECORDS.PAD * 2;
+  const g = ctx.createLinearGradient(card.x + RECORDS.PAD, 0, card.x + card.w - RECORDS.PAD, 0);
+  g.addColorStop(0, 'rgba(127, 212, 255, 0)');
+  g.addColorStop(0.5, 'rgba(127, 212, 255, 0.40)');
+  g.addColorStop(1, 'rgba(127, 212, 255, 0)');
+  ctx.fillStyle = g;
+  ctx.fillRect(card.x + RECORDS.PAD, card.y + RECORDS.RULE_Y, ruleW, 1);
+
+  // Always SCORES_KEPT rows, filled or not. A table that grows a row at a time
+  // hides how many places there are to play for; an empty slot is an invitation.
+  for (let i = 0; i < SCORES_KEPT; i++) {
+    drawRecordRow(ctx, card, i, table[i],
+                  fromRun && game.newRank === i, game.time);
+  }
+
+  for (const r of recordsButtonRects(game.recordsFrom)) {
+    drawCardButton(ctx, r, game.menuHover === r.id);
+  }
+}
+
+function drawRecordRow(ctx, card, i, score, isNew, time) {
+  const x = card.x + RECORDS.PAD;
+  const w = card.w - RECORDS.PAD * 2;
+  const y = card.y + RECORDS.ROW_Y + i * (RECORDS.ROW_H + RECORDS.ROW_GAP);
+  const mid = y + RECORDS.ROW_H / 2;
+
+  if (isNew) {
+    // The run's own row, filled — the same language the selected difficulty
+    // pill speaks, so "this one is yours" needs no legend. It breathes slightly
+    // because the card can open with the new row anywhere in the table, and the
+    // eye has to find it rather than assume it is at the top.
+    const pulse = 0.86 + 0.14 * Math.sin((time / 1000) * TAU * 0.6);
+    ctx.save();
+    ctx.globalAlpha = pulse;
+    roundRectPath(ctx, x, y, w, RECORDS.ROW_H, 8);
+    ctx.fillStyle = MENU_SKIN.pillOn;
+    ctx.fill();
+    ctx.restore();
+  } else {
+    roundRectPath(ctx, x, y, w, RECORDS.ROW_H, 8);
+    ctx.fillStyle = 'rgba(127, 212, 255, 0.06)';
+    ctx.fill();
+  }
+
+  const filled = typeof score === 'number';
+  ctx.textBaseline = 'middle';
+  ctx.textAlign = 'left';
+
+  ctx.font = `800 13px ${FONT}`;
+  ctx.fillStyle = isNew ? MENU_SKIN.onText : (filled ? MENU_SKIN.accentDim : COLORS.hudDim);
+  ctx.fillText(String(i + 1), x + 12, mid);
+
+  if (isNew) {
+    ctx.font = `800 8px ${FONT}`;
+    ctx.fillStyle = MENU_SKIN.onText;
+    ctx.fillText('NEW', x + 28, mid + 0.5);
+  }
+
+  ctx.textAlign = 'right';
+  ctx.font = `${filled ? 800 : 500} ${filled ? 17 : 15}px ${FONT}`;
+  // An em dash for an unclaimed slot rather than a zero: zero is a score
+  // somebody got, and three zeroes would read as three terrible runs.
+  ctx.fillStyle = isNew ? MENU_SKIN.onText : (filled ? COLORS.hudText : COLORS.hudDim);
+  ctx.fillText(filled ? String(score) : '—', x + w - 12, mid);
+  ctx.textAlign = 'left';
+}
+
+// The card's own button. Its own function rather than the title screen's,
+// because those are 232px wide and these are 112 — the same 17px label with 5px
+// tracking would not fit "TRY AGAIN" inside one.
+function drawCardButton(ctx, r, hot) {
+  if (r.primary) {
+    const g = ctx.createLinearGradient(0, r.y, 0, r.y + r.h);
+    g.addColorStop(0, hot ? MENU_SKIN.startTopHot : MENU_SKIN.startTop);
+    g.addColorStop(1, hot ? MENU_SKIN.startBotHot : MENU_SKIN.startBot);
+    ctx.save();
+    ctx.shadowColor = MENU_SKIN.glow;
+    ctx.shadowBlur = hot ? 18 : 10;
+    roundRectPath(ctx, r.x, r.y, r.w, r.h, MENU_SKIN.RADIUS);
+    ctx.fillStyle = g;
+    ctx.fill();
+    ctx.restore();
+  } else {
+    roundRectPath(ctx, r.x, r.y, r.w, r.h, MENU_SKIN.RADIUS);
+    ctx.fillStyle = hot ? MENU_SKIN.fillHover : MENU_SKIN.fill;
+    ctx.fill();
+  }
+
+  roundRectPath(ctx, r.x, r.y, r.w, r.h, MENU_SKIN.RADIUS);
+  ctx.lineWidth = 1;
+  ctx.strokeStyle = hot ? MENU_SKIN.strokeHover
+                        : (r.primary ? MENU_SKIN.strokeOn : MENU_SKIN.stroke);
+  ctx.stroke();
+
+  ctx.textBaseline = 'middle';
+  ctx.font = `800 12px ${FONT}`;
+  ctx.fillStyle = r.primary ? MENU_SKIN.onText : (hot ? COLORS.hudText : MENU_SKIN.accentDim);
+  drawTracked(ctx, r.label, r.x + r.w / 2, r.y + r.h / 2 + 0.5, 2.2);
 }
 
 // Centred text with letter spacing, placed one glyph at a time.
