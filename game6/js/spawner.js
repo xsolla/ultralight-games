@@ -447,8 +447,18 @@ function spawnFormation(ramp, diff, playerX, out) {
     ? chainAgeOffsets(f.path, template, f.gap * type.dispW, f.count)
     : null;
 
+  // Only a chain carries a shared counter, so only a chain can pay the
+  // clearance bonus. `gap` is already what separates the chains from the ranks
+  // in FORMATIONS — see the "---- Chains ----" block there — so this needs no
+  // new field in the table.
+  const chain = f.gap != null ? makeChain(f.count) : null;
+
   for (let i = 0; i < f.count; i++) {
-    if (out.length >= ENEMY_MAX) return;
+    if (out.length >= ENEMY_MAX) {
+      // The ceiling truncates the line, so the counter has to shrink with it.
+      if (chain) chainTruncate(chain, i);
+      return;
+    }
     const p = Object.assign({}, template);
     p.x0 = template.x0 + (i - (f.count - 1) / 2) * f.dx;
     // A shared amp/freq with a stepped phase is what makes a weaving rank hold
@@ -458,7 +468,7 @@ function spawnFormation(ramp, diff, playerX, out) {
     // Spin phase stays per-enemy: links sharing a trajectory should not also
     // rotate in lockstep, which reads as one rigid object rather than a chain.
     p.rot0 = Math.random() * TAU;
-    out.push(makeEnemy(typeIdx, p, ages ? -ages[i] : -i * f.delayMs));
+    out.push(makeEnemy(typeIdx, p, ages ? -ages[i] : -i * f.delayMs, chain));
   }
 }
 
@@ -533,9 +543,16 @@ const SHOOTER_WAVES = {
                                  0, dir);
     const ages = chainAgeOffsets('shooterCurve', template,
                                  REAVER_GAP * ENEMY_TYPES[idx].dispW, n);
+    // The armed chain, and the only set piece that is one — an arrowhead and a
+    // crossing wing are formations, not lines. It pays the clearance bonus on
+    // the same terms the tumbling chains do.
+    const chain = makeChain(n);
     for (let i = 0; i < n; i++) {
-      if (out.length >= ENEMY_MAX) return;
-      out.push(makeEnemy(idx, Object.assign({}, template), -ages[i]));
+      if (out.length >= ENEMY_MAX) {
+        chainTruncate(chain, i);
+        return;
+      }
+      out.push(makeEnemy(idx, Object.assign({}, template), -ages[i], chain));
     }
   },
 

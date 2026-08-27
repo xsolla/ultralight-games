@@ -74,6 +74,25 @@ const HUD_BTN = {
 // Order is fixed by branding.md §2: sound, exit, fullscreen, left to right.
 const HUD_BTN_IDS = ['sound', 'exit', 'fullscreen'];
 
+// The title screen carries the same row minus exit, whose job in branding.md §2
+// is "return to the title screen" — which is where the player already is, so it
+// would be a button that does nothing. game2 drops it there for the same reason
+// (branding.md §6). Order and appearance are untouched.
+//
+// The row stays RIGHT-aligned, so dropping the middle button closes the gap
+// rather than leaving a hole in the row — which costs sound its mid-run column
+// (248 -> 284) while fullscreen keeps its corner. That is the right trade: the
+// corner is the position the player aims at without looking, and a row with a
+// hole in it reads as a button that failed to draw.
+const MENU_BTN_IDS = ['sound', 'fullscreen'];
+
+// Which of the shared buttons a screen offers. One function so the painter and
+// game.js's hit test can never disagree about what is on screen — the same
+// contract hudButtonRects itself exists for, one level up.
+function hudButtonIds(screen) {
+  return screen === 'menu' ? MENU_BTN_IDS : HUD_BTN_IDS;
+}
+
 // LAYOUT DEVIATION, in the terms branding.md §6 asks for. The spec is a vertical
 // column at a right inset of 28 on an 800x600 field. This game is 360x640, and
 // both numbers break here: a column runs 102px down the right edge, straight
@@ -167,6 +186,16 @@ function drawScene(ctx, game) {
   // does not.
   drawBackground(ctx);
 
+  // Screens branch at the top and return, as CLAUDE.md §5 requires. The title
+  // screen shares the background wash and nothing else — it has its own
+  // backdrop, its own composition and its own buttons, all of them menu.js's.
+  // Reaching forward to a module loaded after this one is fine because it only
+  // happens at run time, after Game.init(); see the load-order note in §3.
+  if (game.screen === 'menu') {
+    drawMenu(ctx, game);
+    return;
+  }
+
   const shake = shakeOffset(game);
   ctx.save();
   if (shake) ctx.translate(shake.x, shake.y);
@@ -253,9 +282,11 @@ function drawPlayer(ctx, p) {
   ctx.translate(p.x, p.y);
   ctx.rotate(bank);
   ctx.scale(scale, scale);
-  // Blink the hull down rather than fully out during post-hit grace: the player
-  // still has to dodge while invulnerable, so the ship must stay trackable.
-  if (playerBlinkOff(p)) ctx.globalAlpha = 0.25;
+  // The hull draws at full strength through the post-hit grace period. The hit
+  // itself is already reported by the impact burst and the screen shake
+  // (Game.onPlayerHit), and those land ON the frame of the blow, where the
+  // information is; a flicker running for the whole 1200ms after it was reading
+  // as the damage still happening.
   Atlas.drawShip(ctx, p.ship, playerFrame(p), 0, 0, ship.dispW);
   ctx.restore();
 
@@ -942,20 +973,22 @@ function drawScore(ctx, game) {
 // Layout, as a pure function of the constants. Both the painting below and the
 // hit test in game.js read it, so what is clicked is by construction what was
 // drawn — see the note in this file's banner.
-function hudButtonRects() {
+function hudButtonRects(screen) {
+  const ids = hudButtonIds(screen);
   const w = HUD_BTN.SIZE;
-  const n = HUD_BTN_IDS.length;
+  const n = ids.length;
   const x0 = CANVAS_W - HUD_PAD - (n * w + (n - 1) * HUD_BTN.GAP);
-  return HUD_BTN_IDS.map((id, i) => ({
+  return ids.map((id, i) => ({
     id, x: x0 + i * (w + HUD_BTN.GAP), y: HUD_PAD, w, h: w,
   }));
 }
 
 // Which button is under a logical point, or null. Grown by HUD_BTN_SLOP — see
-// the note on that constant.
-function hudButtonAt(px, py) {
+// the note on that constant. Takes the screen rather than reading it off Game,
+// so this stays a pure function of its arguments.
+function hudButtonAt(px, py, screen) {
   const k = HUD_BTN_SLOP;
-  for (const r of hudButtonRects()) {
+  for (const r of hudButtonRects(screen)) {
     if (px >= r.x - k && px <= r.x + r.w + k &&
         py >= r.y - k && py <= r.y + r.h + k) return r.id;
   }
@@ -967,7 +1000,7 @@ function drawHudButtons(ctx, game) {
   // keeps the glyph in sync for free (branding.md §4).
   const full = game.isFullscreen();
 
-  for (const r of hudButtonRects()) {
+  for (const r of hudButtonRects(game.screen)) {
     const hot = game.hudHover === r.id;
     roundRectPath(ctx, r.x, r.y, r.w, r.h, HUD_BTN.RADIUS);
     ctx.fillStyle = hot ? HUD_BTN.fillHover : HUD_BTN.fill;

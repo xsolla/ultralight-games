@@ -12,8 +12,9 @@
 // ---- Tunable ---------------------------------------------------------------
 const SCROLL_EASE = 6;      // 1/s — how fast the starfield ramps in/out of turbo
 const DT_CLAMP_MS = 100;    // a backgrounded tab must not teleport the ship
-// How long the wreck burns before the run starts over. Comfortably longer than
-// the explosion chain in explosions.js, so the restart never cuts it off.
+// How long the wreck burns before the title screen comes back. Comfortably
+// longer than the explosion chain in explosions.js, so the return never cuts
+// it off mid-blast.
 const RESPAWN_MS  = 2100;
 
 // ---- Scoring ---------------------------------------------------------------
@@ -37,6 +38,20 @@ const SHAKE_HIT_MAG   = 5;
 // not expected to keep playing through.
 const SHAKE_DEATH_MS  = 620;
 const SHAKE_DEATH_MAG = 10;
+
+// ---- Matched-bonus payouts -------------------------------------------------
+// A named weapon or hull bubble is an informed choice (CLAUDE.md §7): the player
+// can see what is inside before flying at it. Which leaves one dead case — the
+// bubble holding what they are ALREADY flying, where the swap is a no-op and the
+// catch pays nothing. These are what it pays instead, in hits.
+//
+// The hull is worth double because catching your own is the rarer coincidence
+// and the worse consolation: a matched weapon bubble is one of five, a matched
+// hull one of three, and hull bubbles are scarcer to begin with (BONUSES `w` of
+// 12 against 20). Paying both the same would make the rarer event the cheaper
+// one.
+const WEAPON_MATCH_HEAL = 1;   // hits, when the bubble holds the gun in hand
+const SHIP_MATCH_HEAL   = 2;   // hits, when it holds the hull already flown
 
 // ---- What a caught bonus does ----------------------------------------------
 // One entry per BONUSES.kind. It lives here rather than in pickups.js because
@@ -63,13 +78,33 @@ const BONUS_EFFECTS = {
     game.onPlayerHit(row.color, row.spark);
   },
 
-  weapon: (game, arg) => setWeapon(game.player, arg),
-  ship:   (game, arg) => setShip(game.player, arg),
+  // Both named bonuses fall back to armour when they name what is already in
+  // hand. Decided HERE rather than in setWeapon/setShip because those are the
+  // armour/weapon model and know nothing about bonuses — the debug keys and a
+  // future menu call them too, and neither should hand out hits.
+  weapon: (game, arg) => {
+    if (arg === game.player.weapon) healPlayer(game.player, WEAPON_MATCH_HEAL);
+    else setWeapon(game.player, arg);
+  },
+
+  // setShip is called either way: on a matching hull it swaps nothing but still
+  // fires the swap flash, and a catch that produced no flash would read as
+  // having failed. The heal is what it produces instead of a swap.
+  ship: (game, arg) => {
+    const same = arg === game.player.ship;
+    setShip(game.player, arg);
+    if (same) healPlayer(game.player, SHIP_MATCH_HEAL);
+  },
+
   turbo:  (game) => startTurbo(game.player),
   wing:   (game) => spawnWingmen(game.wingmen, game.player),
 };
 
 const Game = {
+  // 'menu' | 'playing'. The rest of CLAUDE.md §5's list — shipselect, paused,
+  // gameover, records — are not built yet; each arrives as a branch here, in
+  // update() and in drawScene(), and nothing else has to learn about it.
+  screen: 'menu',
   canvas: null,
   ctx: null,
   lastTime: 0,
@@ -108,6 +143,8 @@ const Game = {
   // ---- HUD ----
   soundState: 'on',     // 'on' | 'musicoff' | 'off'; see SOUND_CYCLE
   hudHover: null,       // id of the button under the pointer, or null
+  menuHover: null,      // ...and the title screen's own, which never coexist:
+                        // a pointer over a HUD button is over no menu button
   // True from a pointerdown that landed on a button until it is released. While
   // it is set the ship does not follow the pointer at all, so dragging off a
   // button cannot fling the ship into the corner behind it.
@@ -141,7 +178,11 @@ const Game = {
     this.bindInput();
 
     Stars.init();
-    this.resetRun(0);
+    Rays.init();
+    Bokeh.init();
+    // A run is built up front even though the title screen is what opens, so
+    // every reader of Game.player has something to read before the first START.
+    this.resetRun(START_SHIP);
     Atlas.load();
 
     requestAnimationFrame((t) => this.loop(t));
@@ -170,6 +211,31 @@ const Game = {
     resetSpawner(this.spawn);
   },
 
+  // ---- Screens ------------------------------------------------------------
+  // Begin a run on the hull the title screen was showing, at the difficulty its
+  // picker was showing. Both are read from the same state the menu painted, so
+  // what starts is by construction what the player saw.
+  //
+  // START_SHIP, never this.player.ship: that field is the hull the LAST run
+  // ended on, which a ship bonus may have changed, and reading it here would
+  // carry a mid-run swap into every run that followed.
+  startRun() {
+    this.resetRun(START_SHIP);
+    this.screen = 'playing';
+    this.menuHover = null;
+  },
+
+  // Back to the title. Hover state is cleared on the way out because it is the
+  // only thing here that a screen change could leave stale — CLAUDE.md §5 asks
+  // for the button RECTS to be cleared too, but there are none to clear: both
+  // layouts are pure functions, so nothing outlives the screen that drew it.
+  toMenu() {
+    this.screen = 'menu';
+    this.menuHover = null;
+    this.hudHover = null;
+    this.hudCapture = false;
+  },
+
   // ---- Canvas -------------------------------------------------------------
   // The element is CSS-sized by styles.css; the backing store is sized to the
   // real device pixels it covers so HUD text and vector art stay crisp.
@@ -196,8 +262,18 @@ const Game = {
     this.canvas.addEventListener('pointermove', (e) => {
       const p = this.toLogical(e);
       this.noteInputKind(e);
-      const over = hudButtonAt(p.x, p.y);
+      const over = hudButtonAt(p.x, p.y, this.screen);
       this.hudHover = over;
+
+      // The title screen has no ship to steer, so the whole pointer path is
+      // just hover. A HUD button wins over a menu button beneath it, the same
+      // precedence the press below uses.
+      if (this.screen === 'menu') {
+        this.menuHover = over ? null : menuButtonAt(p.x, p.y);
+        this.canvas.style.cursor = (over || this.menuHover) ? 'pointer' : 'default';
+        return;
+      }
+
       this.canvas.style.cursor = over ? 'pointer' : 'default';
       // The top corners belong to the HUD. A bare cursor resting on a button
       // must not drag the ship up there to meet it, and a drag that STARTED on
@@ -213,6 +289,7 @@ const Game = {
       this.pointer.active = false;
       this.pointerDown = false;
       this.hudHover = null;
+      this.menuHover = null;
       this.hudCapture = false;
     });
 
@@ -223,11 +300,23 @@ const Game = {
       // HUD FIRST, always (CLAUDE.md §5). The buttons sit over the playfield, so
       // a tap that hits one must not also steer or fire — hence the early
       // return rather than a flag checked later.
-      const hit = hudButtonAt(p.x, p.y);
+      const hit = hudButtonAt(p.x, p.y, this.screen);
       if (hit) {
         this.hudCapture = true;
         this.hudHover = hit;
         this.pressHudButton(hit);
+        return;
+      }
+
+      // The title screen returns either way, pressed or not: there is nothing
+      // behind its buttons to steer or fire, so a tap on the backdrop is not an
+      // input that has been missed.
+      if (this.screen === 'menu') {
+        const m = menuButtonAt(p.x, p.y);
+        if (m) {
+          this.menuHover = m;
+          this.pressMenuButton(m);
+        }
         return;
       }
 
@@ -248,6 +337,20 @@ const Game = {
     window.addEventListener('keydown', (e) => {
       if (e.repeat) return;
       const k = e.key.toLowerCase();
+
+      // The title screen's own keys, and an early return so none of the
+      // run-only keys below can fire at a ship that is not flying yet.
+      if (this.screen === 'menu') {
+        if (k === 'enter' || k === ' ') {
+          this.startRun();
+          e.preventDefault();
+        }
+        // The same 1/2/3 that pick difficulty mid-run, now pointed at the
+        // picker that shows the result.
+        if (k >= '1' && k <= '3') this.diffIdx = +k - 1;
+        return;
+      }
+
       // Scaffolding until pickups exist: these effects are all meant to arrive
       // from caught bonuses. Delete with drawControlHints().
       if (k === 'z') cycleShip(this.player);
@@ -275,6 +378,7 @@ const Game = {
       this.pointerDown = false;
       this.hudCapture = false;
       this.hudHover = null;
+      this.menuHover = null;
     });
   },
 
@@ -326,14 +430,33 @@ const Game = {
     else this.toggleFullscreen();
   },
 
-  // branding.md §2 says exit returns to the title screen. There is no title
-  // screen yet (CLAUDE.md §10), so this ends the run instead — the way game1's
-  // exit does, and through the wreck rather than around it, so the button
-  // produces feedback the player has already been taught to read. Rewire it to
-  // the title when menu.js lands; nothing else here has to change.
+  // branding.md §2: exit returns to the title screen. It used to end the run
+  // through the wreck instead, because there was no title to return to; now
+  // that menu.js exists it does what the spec says, and abandoning a run is no
+  // longer dressed up as dying in one.
   endRun() {
-    if (this.player.dead || this.player.hits <= 0) return;
-    this.player.hits = 0;
+    this.toMenu();
+  },
+
+  // One press on the title screen. Here rather than in menu.js for the same
+  // reason pressHudButton is here rather than in render.js: every one of these
+  // is a state transition, and neither presentation module mutates state.
+  pressMenuButton(id) {
+    if (id === 'start') {
+      this.startRun();
+      return;
+    }
+    // Drawn, hoverable and pressable, but inert: the high-score popup it opens
+    // needs js/scores.js, still a planned slot in CLAUDE.md §3. It is on the
+    // screen rather than held back so the title's layout is the final one and
+    // adding the popup moves nothing.
+    if (id === 'records') return;
+
+    // Difficulty. Dispatched on the rect's own `kind`/`i` rather than by
+    // parsing the id, so the ids stay opaque strings and a new row in
+    // DIFFICULTIES needs no change here at all.
+    const r = menuButtonRects().find((b) => b.id === id);
+    if (r && r.kind === 'diff') this.diffIdx = r.i;
   },
 
   // Read live rather than tracked, so leaving by Esc or F11 keeps the glyph in
@@ -412,6 +535,16 @@ const Game = {
   },
 
   update(dt) {
+    // The title screen runs its own ambiance and nothing else: no run clock, no
+    // spawner, no collision. The starfield keeps its in-game drift rate so the
+    // menu and the run that follows read as one continuous flight rather than
+    // as two different scenes.
+    if (this.screen === 'menu') {
+      Stars.update(dt, 1);
+      Bokeh.update(dt);
+      return;
+    }
+
     this.runMs += dt;
     const diff = DIFFICULTIES[this.diffIdx];
 
@@ -450,6 +583,11 @@ const Game = {
     for (const e of resolveBulletHits(this.bullets, this.enemies, dt)) {
       explodeEnemy(this.explosions, e);
       maybeDropBonus(this.pickups, e, diff);
+      // On top of that roll, never instead of it: the last link of a cleared
+      // chain can drop twice. Ordered after it so the ceiling in pickups.js is
+      // spent on the ordinary drop first, which is the one that keeps its
+      // per-type odds honest.
+      maybeDropChainBonus(this.pickups, e);
       this.addScore(ENEMY_TYPES[e.t].score);
     }
     // Incoming fire leaves no wreck to explode, but it does leave a mark on the
@@ -467,6 +605,9 @@ const Game = {
       // A ram kills the enemy too, so it drops and scores like any other death.
       // It cost an armour layer to get, which is its own price.
       maybeDropBonus(this.pickups, rammed, diff);
+      // Ramming the last link finishes the chain like anything else does, and
+      // an armour layer is a steep enough price to have paid for it.
+      maybeDropChainBonus(this.pickups, rammed);
       this.addScore(ENEMY_TYPES[rammed.t].score);
       // The impact takes the rammer's colours, so a kill and a hit go off
       // together in the same hue and read as one collision rather than two
@@ -516,10 +657,12 @@ const Game = {
     if (!this.player.dead) return;
 
     this.deathMs += dt;
-    // Scaffolding. The real flow is game-over card -> title -> records
-    // (CLAUDE.md §7), which needs menu.js and scores.js; until those exist the
-    // run simply starts again, on the same hull, once the wreck has burnt out.
-    if (this.deathMs >= RESPAWN_MS) this.resetRun(this.player.ship);
+    // The wreck burns, then the title comes back. Still short of the full §7
+    // flow — that is game-over card -> title -> records, and the card and the
+    // records screen both need scores.js — but the run no longer restarts
+    // itself behind the player, which it did only because there was nowhere
+    // else for it to go.
+    if (this.deathMs >= RESPAWN_MS) this.toMenu();
   },
 };
 

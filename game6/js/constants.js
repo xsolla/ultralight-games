@@ -18,6 +18,20 @@ const MAX_DPR = 2;
 // so the ship is never hidden under a thumb on touch.
 const PLAYFIELD = { top: 28, bottom: 16, side: 6 };
 
+// The hull every run begins on — index 0 of SHIPS, the Interceptor.
+//
+// A run's ship is RUN state: a caught ship bonus moves the player between hulls
+// mid-run (CLAUDE.md §7), and that choice dies with the run that made it. So
+// neither the title screen nor the next run may read it off the player object,
+// which still holds whatever the last run ended on. Both read this instead.
+//
+// It is cross-cutting rather than game.js's own because two modules answer to
+// it: menu.js draws this hull as the title screen's hero, and game.js starts
+// the run on it. When the ship-select screen in CLAUDE.md §3 lands it becomes
+// that picker's DEFAULT rather than the fixed answer, and the picker's result
+// is what both readers move to.
+const START_SHIP = 0;
+
 // ---- Palette ---------------------------------------------------------------
 const COLORS = {
   // The field is uniformly dark top to bottom. These two are close together on

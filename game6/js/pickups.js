@@ -30,6 +30,14 @@ const PICKUP_POP_MS  = 550;   // of that life spent shrinking and thinning
 // Hard ceiling on live bubbles. A cleared screen full of drops is already the
 // good case; past this the field stops reading.
 const PICKUP_MAX = 14;
+// What clearing a whole chain pays. High because it is the longest single
+// commitment the spawner asks for — seven to nine links on one curve, all of
+// which have to be caught before the tail leaves the screen — and because it is
+// EARNED rather than rolled. Which is also why it is flat rather than scaled by
+// diff.dropMult: that dial is already acting on the per-link drops this one
+// lands on top of, and taking a difficulty's generosity out of an achievement
+// would make the hard setting punish the play it is meant to reward.
+const CHAIN_DROP = 0.80;
 
 function makePickup(typeIdx, x, y) {
   const row = BONUSES[typeIdx];
@@ -93,5 +101,25 @@ function pickBonus() {
 function maybeDropBonus(list, e, diff) {
   if (list.length >= PICKUP_MAX) return;
   if (Math.random() >= ENEMY_TYPES[e.t].drop * diff.dropMult) return;
+  list.push(makePickup(pickBonus(), e.x, e.y));
+}
+
+// The reward for clearing a whole chain, rolled when the last link goes down.
+// It is IN ADDITION to that link's own drop above, so one kill can produce two
+// bubbles — which is the point: finishing a chain has to be worth more than
+// picking off its head and letting the rest go by.
+//
+// Both bubbles are born at the same point when that happens, but each rolls its
+// own sway phase, so they part by up to a full bubble width within a second and
+// never read as one.
+function maybeDropChainBonus(list, e) {
+  // The claim comes FIRST, before the ceiling and before the roll: it is what
+  // marks the chain paid, and a chain that lost its reward to a full field or a
+  // failed roll has still had its one chance. Testing the cheap guards first
+  // would leave the chain unclaimed and let the next link in the same frame try
+  // again, which is the multiple payout this is here to prevent.
+  if (!claimChainClear(e)) return;
+  if (list.length >= PICKUP_MAX) return;
+  if (Math.random() >= CHAIN_DROP) return;
   list.push(makePickup(pickBonus(), e.x, e.y));
 }

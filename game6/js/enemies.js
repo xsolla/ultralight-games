@@ -37,13 +37,54 @@ const ENEMY_DEATH_MS = 90;
 // moment on a curve produces.
 const FACE_MIN_DELTA_SQ = 0.01;
 
-function makeEnemy(typeIdx, params, ageMs) {
+// ---- Chains ----------------------------------------------------------------
+// A chain is a line of enemies spawned as one linked group — the `gap` entries
+// in FORMATIONS and the Reaver set piece — and clearing the whole of it pays a
+// bonus (pickups.js). Tracking that needs a live count somewhere, and this is
+// the shape that needs no registry: the spawner makes ONE of these and every
+// link holds a reference to it, so it stays reachable exactly as long as a link
+// does and is collected with the last of them. A registry keyed by id would
+// have to be swept, and a run is twenty minutes of chains.
+//
+// Only KILLS are counted, which is the whole test: a link culled at the edge
+// never increments `killed`, so a chain that half-escaped can never reach `n`
+// and can never pay. That is also why there is no live-link count here — one
+// counter answers both "is it finished" and "did the player finish it".
+function makeChain(n) {
+  return { n, killed: 0, paid: false };
+}
+
+// Shrink a chain to the number of links that actually spawned. The spawner can
+// reach ENEMY_MAX part-way through a line, and a chain still counting links
+// that were never created could never be completed and so could never pay.
+// Only ever called at spawn time, before any link can have died.
+function chainTruncate(chain, n) {
+  chain.n = n;
+}
+
+// Claim the payout for a finished chain: true for exactly ONE caller, on the
+// kill that completed it. It mutates, hence the name — a plain predicate would
+// be wrong here, because several links can die in the same frame (one wide
+// volley, or a ram landing beside a bullet) and resolveBulletHits kills all of
+// them before game.js is handed any of them. By then "is this chain finished?"
+// is true for every one of that frame's kills, and a chain would pay once per
+// link. The flag is what makes the reward the chain's rather than the kill's.
+function claimChainClear(e) {
+  const c = e.chain;
+  if (!c || c.paid || c.killed !== c.n) return false;
+  c.paid = true;
+  return true;
+}
+
+// `chain` is the shared counter above, or null for anything spawned loose.
+function makeEnemy(typeIdx, params, ageMs, chain) {
   const type = ENEMY_TYPES[typeIdx];
   const at = PATHS[params.path](ageMs, params);
   return {
     t: typeIdx,
     p: params,
     ageMs,
+    chain: chain || null,
     x: at.x,
     y: at.y,
     hp: params.hp,          // already difficulty-scaled by the spawner
@@ -77,6 +118,9 @@ function makeEnemy(typeIdx, params, ageMs) {
 function killEnemy(e) {
   if (e.deathMs > 0) return false;
   e.deathMs = 1;   // any non-zero value starts the fade; 1 keeps it visible
+  // The one place a kill is counted, so a chain cannot be finished by a route
+  // that forgot to say so — the same reason this returns true exactly once.
+  if (e.chain) e.chain.killed++;
   return true;
 }
 
@@ -128,6 +172,8 @@ function updateEnemies(enemies, dt) {
 
     // Only cull something that has actually been on screen. Formation members
     // are born outside the playfield on purpose and must be allowed to fly in.
+    // A culled link needs no chain bookkeeping: it simply never counted as a
+    // kill, so its chain quietly becomes uncompletable, which is the intent.
     if (!out) e.entered = true;
     else if (e.entered || e.ageMs > ENEMY_MAX_AGE_MS) enemies.splice(i, 1);
   }

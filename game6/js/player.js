@@ -17,8 +17,10 @@ const PLAYER_KEY_DAMP     = 12;     // 1/s — decay toward rest when no key is 
 const PLAYER_START_Y_FRAC = 0.78;   // spawn height as a fraction of the canvas
 // Post-hit grace (CLAUDE.md §7). Long enough to fly clear of the enemy that
 // just hit you, so one collision cannot drain several armour layers.
+// The grace is invisible: the hull does not blink through it. What tells the
+// player they were hit is the impact burst and the shake, both of which fire on
+// the frame of the blow rather than running on after it.
 const PLAYER_INVULN_MS    = 1200;
-const PLAYER_BLINK_MS     = 110;    // on/off period of the invulnerability blink
 
 function createPlayer(shipIdx) {
   return {
@@ -36,7 +38,7 @@ function createPlayer(shipIdx) {
     // The single counter that is both armour and weapon level. Starts at one
     // full layer, i.e. weapon level 1 with the hull's base durability.
     hits: SHIPS[shipIdx].base,
-    invulnMs: 0,        // post-hit grace remaining; blinks while > 0
+    invulnMs: 0,        // post-hit grace remaining; nothing is drawn for it
     dead: false,        // wrecked: flight and gun frozen, explosion playing out
 
     fireMs: 0,          // ms until the next volley may start
@@ -78,10 +80,16 @@ function killPlayer(p) {
   return true;
 }
 
-function healPlayer(p) {
+// `n` is hits, not layers: the matched-bonus payouts in game.js hand over 1 and
+// 2, and on a base-2 hull those are half a layer and a whole one. Paying in the
+// counter's own unit rather than in levels is what keeps a heal worth the same
+// on every hull — a level is 2 hits on an interceptor and 4 on a green heavy,
+// so paying in levels would make the same bubble twice the prize on the ship
+// that already has the most armour.
+function healPlayer(p, n = 1) {
   // At full armour this rolls into the next weapon level with exactly one hit
   // in the new layer, which is the "upgrade" half of the heal bonus.
-  p.hits = Math.min(SHIPS[p.ship].base * 5, p.hits + 1);
+  p.hits = Math.min(SHIPS[p.ship].base * 5, p.hits + n);
 }
 
 // Current speed in px/s, turbo included.
@@ -234,12 +242,6 @@ function updatePlayer(p, dt, input) {
   if (p.turboMs > 0) p.turboMs = Math.max(0, p.turboMs - dt);
   if (p.swapMs > 0) p.swapMs = Math.max(0, p.swapMs - dt);
   if (p.invulnMs > 0) p.invulnMs = Math.max(0, p.invulnMs - dt);
-}
-
-// Is the ship hidden on this frame of the invulnerability blink? render.js asks;
-// the phase lives here so the blink can't drift from the timer driving it.
-function playerBlinkOff(p) {
-  return p.invulnMs > 0 && Math.floor(p.invulnMs / PLAYER_BLINK_MS) % 2 === 1;
 }
 
 // ---- Small shared helpers --------------------------------------------------

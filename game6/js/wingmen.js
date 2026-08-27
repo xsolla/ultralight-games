@@ -91,9 +91,12 @@ function updateWingmen(list, dt, player, firing, out) {
   }
 }
 
-// Whether the hull is on the dark half of its expiry blink. Same shape as
-// playerBlinkOff, and blinking DOWN rather than out for the same reason: the
-// player is still flying formation with it and has to be able to see it.
+// Whether the hull is on the dark half of its expiry blink. This is a countdown
+// the player can act on — the wing is about to leave — and not damage feedback,
+// which is why it survives while the player's own post-hit blink does not.
+//
+// It blinks DOWN rather than out: the player is still flying formation with it
+// and has to be able to see it for the whole warning.
 function wingmanBlinkOff(w) {
   return w.ms < WINGMAN_WARN_MS &&
          Math.floor(w.ms / WINGMAN_BLINK_MS) % 2 === 1;
