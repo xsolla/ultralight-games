@@ -241,6 +241,15 @@ const C = {
   GO_PLAY_W: 200, GO_PLAY_H: 52, GO_PLAY_Y: 236,
   GO_QUIT_W: 130, GO_QUIT_H: 40, GO_QUIT_Y: 300,
 
+  // --- Background music ---
+  // Two tracks, streamed via <audio>. Deliberately not decodeAudioData: a ~1.9MB
+  // MP3 decodes to tens of MB of PCM, which is the sort of cost this game avoids
+  // everywhere else. Playback is per-run only — never on the title screen.
+  BGM_TRACKS: ['assets/bgm/bgm1.mp3', 'assets/bgm/bgm2.mp3'],
+  BGM_VOLUME: 0.45,
+  BGM_FADE_SEC: 3,             // fade-out when returning to the title screen
+  BGM_FADE_TICK_MS: 40,        // fade ramp granularity
+
   // --- Misc ---
   GAMEOVER_DELAY: 800,          // ms before game-over screen appears
 };

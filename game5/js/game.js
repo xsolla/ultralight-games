@@ -234,6 +234,7 @@ const Game = (() => {
     Input.reset();
     state = STATE.PLAYING;
     GameAudio.applyMode(HUD.getSoundMode());
+    GameAudio.startBgm();
   }
 
   function cycleSound() {
@@ -242,7 +243,7 @@ const Game = (() => {
   }
 
   function goToTitle() {
-    GameAudio.stopGameMusic();
+    GameAudio.fadeOutBgm(C.BGM_FADE_SEC);
     persistBest();
     state = STATE.TITLE;
     Title.setBestScore(bestScore);
@@ -486,7 +487,6 @@ const Game = (() => {
     state = STATE.GAMEOVER;
     gameoverTimer = 0;
     gameoverVisible = false;
-    GameAudio.stopGameMusic();
     persistBest();
   }
 
