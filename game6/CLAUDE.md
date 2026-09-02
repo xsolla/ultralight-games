@@ -71,10 +71,11 @@ there when it arrives rather than inventing a new home for it.
   js/ambiance.js                        Stars namespace: parallax starfield; later nebula
   js/render.js                          all canvas drawing — world, HUD, cards — and HUD layout
 ○ js/menu.js                            title, ship select, difficulty, records screens
-  js/audio.js                           Sound namespace: the run's background music
+  js/audio.js                           Sound namespace: background music
   js/scores.js                          localStorage high-score table
   js/game.js                            the Game object: state, screens, input, main loop
   assets/bgm/bgm_ship1..3.mp3           one looping track per hull, named in SHIPS
+  assets/bgm/bgm_title.mp3              the title screen's, named in AUDIO.TITLE_SRC
   assets/sprites/interceptor_atlas.png  the three player ships, 6 frames each
   assets/sprites/projectiles_atlas.png  the five weapon particles, 5 frames each
   assets/sprites/alien_noshoot_atlas.png  the five non-shooting enemies, 5 frames each
@@ -735,19 +736,34 @@ Not yet settled — ask rather than assuming:
   did not move; SFX arrive as preloaded `HTMLAudioElement` pools in the same module,
   the way the reference game's does, and there are no sfx assets yet.
 
-  **The music belongs to the HULL, and playback belongs to the RUN.** Each row of
-  `SHIPS` names its own looping track, so a fourth hull arrives with its music
-  attached. `Sound.inRun` is true only between `startRun()` and `toMenu()`, which is
-  what keeps the title screen silent — not even the sound button can start a track
-  there. The game-over card counts as part of the run it reports, so the music plays
-  under it and lets go at the title.
+  **A TRACK IS A SLOT, and the music belongs to the HULL.** Each row of `SHIPS` names
+  its own looping track, so a fourth hull arrives with its music attached; the title
+  screen is not a row anywhere, so its track is `AUDIO.TITLE_SRC` and it takes the
+  slot after the hulls (`TITLE_TRACK`). `switchTo` never learns which kind of slot it
+  is holding, which is why the title screen gets the crossfade, the fade and the sound
+  button without a branch anywhere. `Sound.current` is the slot that SHOULD be
+  sounding, which is also what lets `resume()` finish a start the browser refused.
 
-  Three durations, and only the first is a plain fade: **leaving for the title fades
-  out over `AUDIO.FADE_MS`** (3 s), **a mid-run hull swap crossfades over
-  `AUDIO.CROSSFADE_MS`** (2 s), and **a run opening out of silence starts at once** —
-  the fade is for leaving, and a run whose first seconds were a ramp would be missing
-  them. A retry from the card is the fourth case and needs no rule of its own: a track
-  that is already sounding is crossed into, never cut.
+  Two durations, and the split is the spec's: **a run handing back to the title takes
+  `AUDIO.FADE_MS`** (3 s) and **every other swap takes `AUDIO.CROSSFADE_MS`** (2 s) —
+  title into a hull at START, hull into hull on a ship bonus, hull into hull on a
+  retry. Out of actual silence a track opens at once instead, which is now only the
+  page-load case: a title screen whose first seconds were a ramp would be missing
+  them. `startMusic` and `startTitle` share that one rule, so neither call site
+  chooses a duration. The game-over card counts as part of the run it reports, so the
+  run's music plays under it and hands over at the title.
+
+  **Nothing plays before the first gesture**, and the title track asked for in
+  `Game.init()` is usually refused outright. `Sound.resume()` is what finishes it,
+  armed on `pointerdown`/`keydown` as the LAST thing `bindInput` does — so a first
+  gesture that happens to be START has already begun the run's music by the time it
+  runs and it finds nothing to do, rather than flickering the title track in behind a
+  run that just left it.
+
+  **Only the title track is fetched at page load.** Elements are built with
+  `preload='none'` and `warm()` raises them: the title's when it is wanted, the hulls'
+  when a run begins and a ship bonus could reach them. The four files are ~14 MB, and
+  three of them are worth nothing until somebody presses START.
 
   Crossfades are **equal-power** (`from·cos + to·sin`), because two linear ramps
   crossing at half volume sum to ~3 dB below either track alone — a dip in the middle

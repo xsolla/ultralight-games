@@ -1,11 +1,16 @@
 // ============================================================================
-// audio.js — Sound namespace: the run's background music.
-// Owns the <audio> elements, which track belongs to which hull, and the volume
-// tweens that move between them. It is a READER of state, never an owner:
-// game.js says a run began, a hull changed, or the run handed back to the
-// title, and the sound button's three-state value arrives through applyState.
-// No game state, no drawing, no SFX yet — when those land they go here too,
-// as the reference game's preloaded pools.
+// audio.js — Sound namespace: the game's background music.
+// Owns the <audio> elements, which track belongs where, and the volume tweens
+// that move between them. It is a READER of state, never an owner: game.js
+// says a run began, a hull changed, or the title screen is up, and the sound
+// button's three-state value arrives through applyState. No game state, no
+// drawing, no SFX yet — when those land they go here too, as the reference
+// game's preloaded pools.
+//
+// A TRACK IS A SLOT, and the title screen's is the last one. The hulls take
+// slots 0..SHIPS.length-1 and the title takes TITLE_TRACK after them, so
+// switchTo() never learns which kind it is holding and the title screen gets
+// the crossfade, the fade and the sound button for free.
 //
 // HTMLAudioElement rather than Web Audio, for the reason CLAUDE.md §2 gives:
 // the fetch+decode route is blocked by CORS on file://, and this game must run
@@ -19,37 +24,48 @@
 
 // ---- Tunable audio knobs ---------------------------------------------------
 const AUDIO = {
+  // The title screen's track. The hulls' live on their SHIPS rows, because a
+  // hull owns its music; the title screen is not a row anywhere, so its own
+  // track is the one that belongs here.
+  TITLE_SRC: 'assets/bgm/bgm_title.mp3',
   VOLUME: 0.45,        // music level, 0..1 — under the game, not over it
-  FADE_MS: 3000,       // ms to fade out when a run hands back to the title
-  CROSSFADE_MS: 2000,  // ms for a mid-run hull swap: old track out, new one in
+  FADE_MS: 3000,       // ms for the run's music to leave when the title returns
+  CROSSFADE_MS: 2000,  // ms for every other swap: old track out, new one in
   TICK_MS: 40,         // ms between volume steps — 25/s is below hearing a stair
 };
 
+// The slot after the hulls. A load-time read of SHIPS, which is legal because
+// data.js is ahead of this file in index.html's load order — the same one
+// exception SHOOTER_IDX in spawner.js takes.
+const TITLE_TRACK = SHIPS.length;
+
 const Sound = {
-  tracks: [],       // ship index -> HTMLAudioElement, or null if it wouldn't build
-  current: -1,      // ship index owning playback, or -1 for silence
+  tracks: [],       // slot -> HTMLAudioElement, or null if it wouldn't build
+  current: -1,      // slot owning playback, or -1 for silence. This is also the
+                    // record of what SHOULD be sounding, which is what lets
+                    // resume() finish a start the autoplay policy refused.
   fades: [],        // live volume tweens: { i, from, to, ms, start, stop }
   timer: null,      // the one interval driving every tween
   state: 'on',      // mirrors Game.soundState; see SOUND_CYCLE in constants.js
-  // True only between startMusic() and fadeOutMusic(), which is what binds the
-  // music to a RUN rather than to the sound setting: nothing can start a track
-  // on the title screen, not even toggling the sound button there.
+  // True between startMusic() and startTitle(). It no longer decides whether
+  // anything plays — the title has its own track now — only whether a HULL
+  // change means anything, which outside a run it does not.
   inRun: false,
 
   musicEnabled() { return this.state === 'on'; },
 
-  // One element per hull, built on the first run rather than at page load: the
-  // three files together are ~10MB, and none of them is wanted until somebody
-  // presses START. From then on all three are buffering, so the mid-run swap a
-  // ship bonus causes has its track ready to cross into.
+  // One element per slot, all built on first use. Cheap: nothing is fetched
+  // until warm() asks for it, which matters because the four files together are
+  // ~14MB and only the title's is wanted at page load.
   ensureTracks() {
     if (this.tracks.length || typeof Audio === 'undefined') return;
-    this.tracks = SHIPS.map((s) => {
-      if (!s.bgm) return null;
+    const srcs = SHIPS.map((s) => s.bgm).concat(AUDIO.TITLE_SRC);
+    this.tracks = srcs.map((src) => {
+      if (!src) return null;
       try {
-        const a = new Audio(s.bgm);
-        a.loop = true;      // a hull's track runs for as long as it is flown
-        a.preload = 'auto';
+        const a = new Audio(src);
+        a.loop = true;      // a track runs for as long as its screen or hull does
+        a.preload = 'none';
         a.volume = AUDIO.VOLUME;
         return a;
       } catch (e) {
@@ -58,15 +74,60 @@ const Sound = {
     });
   },
 
+  // Begin buffering a slot, before anything needs to hear it — so a crossfade
+  // has something to cross into rather than two seconds of nothing.
+  warm(i) {
+    const a = this.tracks[i];
+    if (!a || a.preload !== 'none') return;   // already warmed
+    a.preload = 'auto';
+    // Raising preload should be enough on its own, but load() is what actually
+    // starts every engine fetching. Safe only because the guard above means
+    // this can never run on a track that is already playing, which load() would
+    // rewind out from under itself.
+    try { a.load(); } catch (e) { /* ignore */ }
+  },
+
   // ---- Public entry points -------------------------------------------------
-  // A run begins on `shipIdx`. Out of silence the track opens at once — the
-  // fade in the spec is for LEAVING, and a run whose first seconds were a ramp
-  // would be missing them. Anything still sounding is crossed into instead of
-  // being cut: that is a retry from the game-over card, where the previous run
-  // may have ended on a different hull and its music is still playing.
+  // A run begins on `shipIdx`. Out of silence the track opens at once — a run
+  // whose first seconds were a ramp would be missing them. Anything still
+  // sounding is crossed into instead of being cut, which is the usual case now
+  // that the title has music of its own, and also covers a retry from the
+  // game-over card onto a hull the last run did not end on.
   startMusic(shipIdx) {
     this.inRun = true;
     this.switchTo(shipIdx, this.sounding() ? AUDIO.CROSSFADE_MS : 0);
+    // Buffer the hulls this run could swap to, now that there is a run to swap
+    // during. After the switch, so the track being heard gets the bandwidth
+    // first and the ones that might never be needed queue behind it.
+    for (let i = 0; i < SHIPS.length; i++) this.warm(i);
+  },
+
+  // The title screen is up: at page load, and again when a run hands back to
+  // it. One entry point for both, because the rule that separates them is the
+  // same one startMusic uses — out of silence it opens at once, and over a
+  // running track it crosses.
+  //
+  // The one asymmetry is deliberate and is the spec's: leaving a RUN for the
+  // title takes the long FADE_MS, where every other swap takes CROSSFADE_MS.
+  // The run's music still fades out over three seconds exactly as it did when
+  // the title was silent — the title's track simply rises through it now
+  // instead of three seconds of nothing.
+  startTitle() {
+    this.inRun = false;
+    this.switchTo(TITLE_TRACK, this.sounding() ? AUDIO.FADE_MS : 0);
+  },
+
+  // First-gesture hook. A page cannot play audio before the user has touched
+  // it, so the title track asked for at load is very often refused; this is
+  // what finishes that start. `current` is the record of what should be
+  // sounding, so this needs to know nothing about which screen is up.
+  //
+  // Idempotent, and ordered to stay that way: game.js arms it AFTER its own
+  // input handlers, so a first gesture that happens to be START has already
+  // begun the run's music by the time this runs, and it finds nothing to do
+  // rather than flickering the title track in behind it.
+  resume() {
+    if (this.current >= 0) this.play(this.current);
   },
 
   // The hull changed mid-run (a ship bonus). Catching the hull already being
@@ -77,32 +138,14 @@ const Sound = {
     this.switchTo(shipIdx, AUDIO.CROSSFADE_MS);
   },
 
-  // The run handed back to the title screen.
-  fadeOutMusic() {
-    this.inRun = false;
-    const i = this.current;
-    if (i < 0) return;
-    const a = this.tracks[i];
-    // Already silent — the player has music turned off — so there is nothing
-    // to fade and the track is simply released.
-    if (!a || a.paused) { this.silence(i); return; }
-    // `current` is deliberately left pointing at it until the fade finishes:
-    // pressing START again mid-fade should catch this track on the way down
-    // rather than find silence and open a second copy of it.
-    this.tween(i, 0, AUDIO.FADE_MS, true);
-  },
-
   // The sound button moved. Cut rather than fade: the button is an instruction,
   // not a transition. Pausing rather than stopping keeps the position, so
   // 'musicoff' -> 'on' picks the track up where it was left.
   applyState(state) {
     this.state = state;
-    if (!this.tracks.length) return;   // no run yet; nothing to bring in line
-    if (this.musicEnabled()) {
-      if (this.inRun && this.current >= 0) this.play(this.current);
-    } else {
-      for (const a of this.tracks) if (a && !a.paused) a.pause();
-    }
+    if (!this.tracks.length) return;   // nothing built yet; nothing to align
+    if (this.musicEnabled()) this.resume();
+    else for (const a of this.tracks) if (a && !a.paused) a.pause();
   },
 
   // ---- Playback ------------------------------------------------------------
@@ -118,6 +161,7 @@ const Sound = {
   // rather than one following the other.
   switchTo(i, ms) {
     this.ensureTracks();
+    this.warm(i);
     const prev = this.current;
     if (prev === i) {
       // Already ours. The only tween that can be running on it is a fade-out

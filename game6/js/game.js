@@ -213,6 +213,12 @@ const Game = {
     // every reader of Game.player has something to read before the first START.
     this.resetRun(START_SHIP);
     Atlas.load();
+    // The title screen opens with its own music. Asked for here even though a
+    // page that has not been touched yet is usually refused permission to play
+    // — the first gesture below is what finishes the start when it is, and this
+    // is what plays immediately when it is not (an embed granted autoplay, or a
+    // browser that already trusts this origin).
+    Sound.startTitle();
 
     requestAnimationFrame((t) => this.loop(t));
   },
@@ -272,10 +278,11 @@ const Game = {
     this.menuHover = null;
     this.hudHover = null;
     this.hudCapture = false;
-    // ...and the other end of the binding. Here rather than at the wreck: the
-    // game-over card sits over the run it reports and is still part of it, so
-    // the music carries through and the title screen is where it lets go.
-    Sound.fadeOutMusic();
+    // ...and the other end of it. Here rather than at the wreck: the game-over
+    // card sits over the run it reports and is still part of it, so the run's
+    // music carries through and hands over here — fading out over three
+    // seconds, with the title's own track rising through the fade.
+    Sound.startTitle();
   },
 
   // Open the records card over whatever is on screen now. `from` is 'menu' when
@@ -472,6 +479,16 @@ const Game = {
       this.hudHover = null;
       this.menuHover = null;
     });
+
+    // The browser will not let a page play audio until the user has touched it,
+    // so the title music asked for in init() is usually refused; this is what
+    // finishes it. LAST in this method on purpose: these fire after the
+    // handlers above, so a first gesture that happens to be START has already
+    // begun the RUN's music and Sound.resume() finds nothing left to do —
+    // otherwise the title track would flicker in behind the run it just left.
+    const firstGesture = () => Sound.resume();
+    window.addEventListener('pointerdown', firstGesture, { once: true });
+    window.addEventListener('keydown', firstGesture, { once: true });
   },
 
   // ---- Scoring ------------------------------------------------------------
