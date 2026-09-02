@@ -42,7 +42,7 @@ const Debris = (() => {
                                                          C.POWERUP_MULT_COLOR;
       } else {
         hsl = [hue, 100, C.SAFE_LIGHTNESS];
-        segmentColor = `hsl(${hue},100%,65%)`;
+        segmentColor = Glow.quantHue(hue, 100, 65);
       }
 
       const a0 = Helix.getSegmentAngle(ring, i, difficulty);
@@ -77,13 +77,15 @@ const Debris = (() => {
     }
 
     // Oldest wreckage goes first if a fast run outruns the cap.
-    if (pieces.length > C.DEBRIS_MAX_PIECES) {
-      pieces.splice(0, pieces.length - C.DEBRIS_MAX_PIECES);
+    const cap = Math.min(Quality.get().debrisMax, C.DEBRIS_MAX_PIECES);
+    if (pieces.length > cap) {
+      pieces.splice(0, pieces.length - cap);
     }
   }
 
   function update(dt) {
     const drag = Math.pow(C.DEBRIS_DRAG, dt * 60);
+    const q = Quality.get();
 
     for (let i = pieces.length - 1; i >= 0; i--) {
       const p = pieces[i];
@@ -100,25 +102,48 @@ const Debris = (() => {
       // Vent only while the fragment is still hot — a fragment venting for its
       // whole life floods the particle pool once rings start passing quickly.
       p.gasTimer -= dt;
-      if (p.gasTimer <= 0 && p.life / p.maxLife > C.DEBRIS_GAS_WHILE) {
-        p.gasTimer = C.DEBRIS_GAS_INTERVAL;
+      if (q.gas && p.gasTimer <= 0 && p.life / p.maxLife > C.DEBRIS_GAS_WHILE) {
+        p.gasTimer = C.DEBRIS_GAS_INTERVAL * q.gasIntervalMult;
         const m = midPoint(p);
-        Particles.emitGas(m.x, m.y, `hsl(${p.hsl[0]}, ${p.hsl[1]}%, ${p.hsl[2]}%)`);
+        Particles.emitGas(m.x, m.y, Glow.quantHue(p.hsl[0], p.hsl[1], p.hsl[2]));
       }
     }
   }
 
+  // Fragments are carried upward at the scroll speed and fly outward, so plenty of
+  // them sit off-screen while still costing a full tube draw. Cull like Helix.draw
+  // already does for recycled rings.
+  const MARGIN = 60;
+
+  // A depth ramp per fragment per frame is up to 128 gradient builds a frame. The
+  // ramp only varies with the fragment's screen Y, and a fragment tumbles and fades
+  // out inside 0.7s, so quantizing Y to 8px is invisible here. Rebuilt each frame
+  // because the gradients are positional and fragments keep moving.
+  let shCache = new Map();
+
+  function shadingFor(ctx, my, p) {
+    const qy  = Math.round(my / 8) * 8;
+    const key = qy + ':' + p.hsl[0] + ':' + p.hsl[1] + ':' + p.hsl[2];
+    let sh = shCache.get(key);
+    if (!sh) {
+      sh = Helix.makeShading(ctx, qy, p.thickness * 0.8, p.hsl[0], p.hsl[1], p.hsl[2]);
+      shCache.set(key, sh);
+    }
+    return sh;
+  }
+
   function draw(ctx) {
+    shCache.clear();
     for (const p of pieces) {
       const t     = Math.max(0, p.life / p.maxLife);
       const alpha = Math.min(1, t * 2);         // hold full, then fade out
       const m     = midPoint(p);
+      if (m.y < -MARGIN || m.y > C.CANVAS_H + MARGIN ||
+          m.x < -MARGIN || m.x > C.CANVAS_W + MARGIN) continue;
       // Shade around the fragment itself, not its old ring. A detached piece is
       // just a lit tube; reusing the ring-wide depth ramp drops most of it into
       // the dark far-side band and it reads as grey debris.
-      const shading = Helix.makeShading(
-        ctx, m.y, p.thickness * 0.8, p.hsl[0], p.hsl[1], p.hsl[2]
-      );
+      const shading = shadingFor(ctx, m.y, p);
 
       ctx.save();
       ctx.translate(m.x, m.y);                  // tumble about the fragment
@@ -133,7 +158,7 @@ const Debris = (() => {
     }
   }
 
-  function clear() { pieces = []; }
+  function clear() { pieces = []; shCache.clear(); }
   function count() { return pieces.length; }
 
   return { emitRing, update, draw, clear, count };

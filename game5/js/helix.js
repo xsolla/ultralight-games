@@ -154,96 +154,180 @@ const Helix = (() => {
 
   // Depth ramp for a ring: dark on the far side, bright on the near side.
   // Vertical position within a ring *is* depth, so a vertical gradient shades it.
+  //
+  // The six hsl() strings this needs are the expensive part — template building plus
+  // toFixed allocation, called up to ~95 times a frame between rings and debris. The
+  // strings depend only on (h, s, l), so they are memoized while the gradient objects
+  // stay per-call, keeping the depth ramp positionally exact.
+  const rampCache = new Map();
+
+  function ramp(h, s, l) {
+    const key = (Math.round(h) * 1000000) + (Math.round(s) * 1000) + Math.round(l);
+    let r = rampCache.get(key);
+    if (r) return r;
+    const L = m => Math.max(0, Math.min(95, l * m)).toFixed(1);
+    r = {
+      back:   `hsl(${h}, ${s}%, ${L(C.RING_SHADE_BACK)}%)`,
+      mid:    `hsl(${h}, ${s}%, ${L(1)}%)`,
+      front:  `hsl(${h}, ${s}%, ${L(C.RING_SHADE_FRONT)}%)`,
+      spec0:  `hsla(${h}, ${s}%, ${L(1.35)}%, 0)`,
+      spec1:  `hsla(${h}, ${s}%, ${L(1.45)}%, ${C.RING_SPECULAR})`,
+      glow:   `hsl(${h}, ${s}%, ${L(1.15)}%)`,
+    };
+    // The palette is small and fixed apart from the score hue rotation, but a very
+    // long run still shouldn't grow this without bound.
+    if (rampCache.size > 512) rampCache.clear();
+    rampCache.set(key, r);
+    return r;
+  }
+
   function makeShading(ctx, y, ry, h, s, l) {
+    const c      = ramp(h, s, l);
     const yBack  = y - ry / (1 + C.RING_PERSPECTIVE);
     const yFront = y + ry / (1 - C.RING_PERSPECTIVE);
-    const L = m => Math.max(0, Math.min(95, l * m)).toFixed(1);
 
     const body = ctx.createLinearGradient(0, yBack, 0, yFront);
-    body.addColorStop(0,    `hsl(${h}, ${s}%, ${L(C.RING_SHADE_BACK)}%)`);
-    body.addColorStop(0.55, `hsl(${h}, ${s}%, ${L(1)}%)`);
-    body.addColorStop(1,    `hsl(${h}, ${s}%, ${L(C.RING_SHADE_FRONT)}%)`);
+    body.addColorStop(0,    c.back);
+    body.addColorStop(0.55, c.mid);
+    body.addColorStop(1,    c.front);
 
     // Specular highlight rides the top of the tube, fading out toward the back.
     // Kept below full white so the segment keeps its hue at the near edge.
     const spec = ctx.createLinearGradient(0, yBack, 0, yFront);
-    spec.addColorStop(0,    `hsla(${h}, ${s}%, ${L(1.35)}%, 0)`);
-    spec.addColorStop(0.45, `hsla(${h}, ${s}%, ${L(1.35)}%, 0)`);
-    spec.addColorStop(1,    `hsla(${h}, ${s}%, ${L(1.45)}%, ${C.RING_SPECULAR})`);
+    spec.addColorStop(0,    c.spec0);
+    spec.addColorStop(0.45, c.spec0);
+    spec.addColorStop(1,    c.spec1);
 
-    return { body, spec, glowColor: `hsl(${h}, ${s}%, ${L(1.15)}%)` };
+    return { body, spec, glowColor: c.glow };
   }
 
-  // Traces a variable-width ribbon through `pts` (a tube seen side-on) as one
-  // simple capsule outline: up one side, round the far cap, back down the other,
-  // round the near cap. Kept as a single non-self-intersecting loop so the
-  // nonzero fill rule can't punch holes where a cap meets the body.
-  // vShift lifts it along screen Y to place the specular highlight.
-  function ribbonPath(ctx, pts, widthScale, vShift) {
-    const n = pts.length - 1;
-    const L = [], R = [], ang = [];
-    for (let i = 0; i <= n; i++) {
-      const prev = pts[Math.max(0, i - 1)];
-      const next = pts[Math.min(n, i + 1)];
-      const tx = next.x - prev.x, ty = next.y - prev.y;
-      const len = Math.hypot(tx, ty) || 1;
-      const nx = -ty / len, ny = tx / len;
-      const w  = pts[i].w * widthScale;
-      const cy = pts[i].y + pts[i].w * vShift;
-      L.push({ x: pts[i].x + nx * w, y: cy + ny * w });
-      R.push({ x: pts[i].x - nx * w, y: cy - ny * w });
-      ang.push(Math.atan2(ny, nx));
+  // ── Ribbon geometry ───────────────────────────────────────────────────────
+  //
+  // A segment is a tube seen side-on, drawn as a variable-width ribbon. This is the
+  // hottest code in the game: ~250 ribbon fills a frame. Everything it needs lives
+  // in module-level scratch buffers, so tracing a segment allocates nothing at all.
+  //
+  // The point positions and their normals are independent of how wide the ribbon is
+  // drawn, so they are built once per segment and reused by every pass over it (the
+  // bloom bands, the body, the specular highlight) rather than recomputed per pass.
+
+  const MAXP = C.MAX_RING_STEPS + 1;
+  const _px = new Float32Array(MAXP);   // centreline position
+  const _py = new Float32Array(MAXP);
+  const _pw = new Float32Array(MAXP);   // half-width at this point
+  const _nx = new Float32Array(MAXP);   // unit normal
+  const _ny = new Float32Array(MAXP);
+  const _ang = new Float32Array(MAXP);  // normal angle, for the end caps
+
+  // Samples the tube centreline for one segment into the scratch buffers.
+  function buildPts(geo, a0, a1, steps) {
+    const da = (a1 - a0) / steps;
+    const hw = geo.thickness * 0.5;
+    for (let i = 0; i <= steps; i++) {
+      const a = a0 + da * i;
+      const d = Math.sin(a);                        // +1 nearest, -1 farthest
+      const p = 1 / (1 - C.RING_PERSPECTIVE * d);   // near points project larger
+      _px[i] = geo.cx + geo.rx * Math.cos(a) * p;
+      _py[i] = geo.y  + geo.ry * d * p;
+      _pw[i] = hw * p;
     }
+  }
 
-    const capY = i => pts[i].y + pts[i].w * vShift;
-    const capW = i => pts[i].w * widthScale;
+  // Normals from the sampled centreline. Depends only on _px/_py, so one call
+  // serves every ribbon pass over the same segment.
+  function buildNormals(steps) {
+    for (let i = 0; i <= steps; i++) {
+      const pi = i > 0 ? i - 1 : 0;
+      const ni = i < steps ? i + 1 : steps;
+      const tx = _px[ni] - _px[pi], ty = _py[ni] - _py[pi];
+      const len = Math.sqrt(tx * tx + ty * ty) || 1;
+      const nx = -ty / len, ny = tx / len;
+      _nx[i] = nx; _ny[i] = ny;
+      _ang[i] = Math.atan2(ny, nx);
+    }
+  }
 
+  // Traces the scratch ribbon as one simple capsule outline: up one side, round the
+  // far cap, back down the other, round the near cap. Kept as a single
+  // non-self-intersecting loop so the nonzero fill rule can't punch holes where a cap
+  // meets the body. vShift lifts it along screen Y to place the specular highlight.
+  function ribbonPath(ctx, steps, widthScale, widthAdd, vShift) {
     ctx.beginPath();
-    ctx.moveTo(L[0].x, L[0].y);
-    for (let i = 1; i <= n; i++) ctx.lineTo(L[i].x, L[i].y);
+    // up the left side
+    for (let i = 0; i <= steps; i++) {
+      const w = _pw[i] * widthScale + widthAdd;
+      const cy = _py[i] + _pw[i] * vShift;
+      const x = _px[i] + _nx[i] * w, y = cy + _ny[i] * w;
+      if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    }
     // far cap: sweep the outward half-circle from the L side round to the R side
-    ctx.arc(pts[n].x, capY(n), capW(n), ang[n], ang[n] - Math.PI, true);
-    for (let i = n - 1; i >= 0; i--) ctx.lineTo(R[i].x, R[i].y);
+    ctx.arc(_px[steps], _py[steps] + _pw[steps] * vShift,
+            _pw[steps] * widthScale + widthAdd,
+            _ang[steps], _ang[steps] - Math.PI, true);
+    // back down the right side
+    for (let i = steps - 1; i >= 0; i--) {
+      const w = _pw[i] * widthScale + widthAdd;
+      const cy = _py[i] + _pw[i] * vShift;
+      ctx.lineTo(_px[i] - _nx[i] * w, cy - _ny[i] * w);
+    }
     // near cap: back round to where we started
-    ctx.arc(pts[0].x, capY(0), capW(0), ang[0] + Math.PI, ang[0], true);
+    ctx.arc(_px[0], _py[0] + _pw[0] * vShift, _pw[0] * widthScale + widthAdd,
+            _ang[0] + Math.PI, _ang[0], true);
     ctx.closePath();
   }
 
   // Draws one segment as a lit tube. geo: { cx, y, rx, ry, thickness }.
+  //
+  // `glow` is a bloom strength carried over from the old shadowBlur radii. Rather
+  // than a Gaussian, the silhouette is filled again in widening low-alpha bands
+  // *underneath* the body, so only the rim shows and the bloom hugs the tube exactly.
+  // See C.RING_HALO_BANDS; the band count is a quality knob.
   function drawArc3D(ctx, geo, a0, a1, shading, glow, alpha) {
-    const steps = C.RING_STEPS;
-    const pts = [];
-    for (let i = 0; i <= steps; i++) {
-      const a = a0 + (a1 - a0) * (i / steps);
-      const d = Math.sin(a);                        // +1 nearest, -1 farthest
-      const p = 1 / (1 - C.RING_PERSPECTIVE * d);   // near points project larger
-      pts.push({
-        x: geo.cx + geo.rx * Math.cos(a) * p,
-        y: geo.y  + geo.ry * d * p,
-        w: geo.thickness * 0.5 * p,
-      });
+    const q = Quality.get();
+    const steps = q.ringSteps;
+    buildPts(geo, a0, a1, steps);
+    buildNormals(steps);
+
+    const a = Math.min(1, alpha);
+
+    const bands = q.ringHaloBands;
+    if (glow > 0 && bands > 0) {
+      // Far arcs bloom less — haze falls off with distance, the same depth cue the
+      // shadow radius carried.
+      const midD  = Math.sin((a0 + a1) / 2);
+      const depth = 0.3 + 0.7 * (midD + 1) / 2;
+      const list  = C.RING_HALO_BANDS;
+      ctx.fillStyle = shading.glowColor;
+      // Widest band first so each narrower one layers on top of it.
+      for (let b = list.length - bands; b < list.length; b++) {
+        ribbonPath(ctx, steps, 1, list[b][0] * glow, 0);
+        ctx.globalAlpha = a * list[b][1] * depth;
+        ctx.fill();
+      }
     }
 
-    ctx.save();
-    ctx.globalAlpha = Math.min(1, alpha);
-
-    if (glow > 0) {
-      // Far arcs glow less — haze falls off with distance.
-      const midD = Math.sin((a0 + a1) / 2);
-      ctx.shadowBlur  = glow * (0.2 + 0.8 * (midD + 1) / 2);
-      ctx.shadowColor = shading.glowColor;
-    }
-    ribbonPath(ctx, pts, 1, 0);
+    ctx.globalAlpha = a;
+    ribbonPath(ctx, steps, 1, 0, 0);
     ctx.fillStyle = shading.body;
     ctx.fill();
 
-    ctx.shadowBlur = 0;
-    ribbonPath(ctx, pts, 0.34, -0.34);
+    ribbonPath(ctx, steps, 0.34, 0, -0.34);
     ctx.fillStyle = shading.spec;
     ctx.fill();
 
-    ctx.restore();
+    ctx.globalAlpha = 1;
   }
+
+  // Per-ring draw order, held in scratch arrays so a ring costs no allocation.
+  // Parallel arrays rather than objects: the sort is an insertion sort over at most
+  // SEGMENT_COUNT entries, which beats allocating and sorting objects every frame.
+  const _oi = new Int32Array(C.SEGMENT_COUNT);      // segment index
+  const _os = new Float32Array(C.SEGMENT_COUNT);    // start angle
+  const _od = new Float32Array(C.SEGMENT_COUNT);    // depth key
+
+  // One gradient set per colour per ring rather than per segment — every safe arc on
+  // a ring shares the same depth ramp. Three slots cover safe/deadly/powerup.
+  const _shSafe = { v: null }, _shDeadly = { v: null }, _shPowerup = { v: null };
 
   function drawRing(ctx, ring, score, difficulty) {
     const y   = ring.y;
@@ -259,46 +343,52 @@ const Helix = (() => {
     const hue = (C.RING_HUE_START + score * C.RING_HUE_SCORE_SCALE + ring.hueOffset + 360) % 360;
     const t   = Game.getTime();
 
-    // One gradient per colour rather than per segment — every safe arc on a ring
-    // shares the same depth ramp.
-    const shadingCache = {};
+    _shSafe.v = _shDeadly.v = _shPowerup.v = null;
     function shadeFor(type) {
-      if (shadingCache[type]) return shadingCache[type];
+      const slot = type === 'deadly' ? _shDeadly : type === 'powerup' ? _shPowerup : _shSafe;
+      if (slot.v) return slot.v;
       let hsl;
       if (type === 'deadly')       hsl = C.DEADLY_HSL;
       else if (type === 'powerup') hsl = C.POWERUP_HSL[ring.powerupType] || C.POWERUP_HSL.mult;
       else                         hsl = [hue, 100, C.SAFE_LIGHTNESS];
-      return (shadingCache[type] = makeShading(ctx, y, ry, hsl[0], hsl[1], hsl[2]));
+      return (slot.v = makeShading(ctx, y, ry, hsl[0], hsl[1], hsl[2]));
     }
 
     // Far arcs first, so near arcs overlap them where the ellipse crosses itself.
-    const order = [];
+    // Insertion sort by depth, ascending, straight into the scratch arrays.
+    let n = 0;
     for (let i = 0; i < seg; i++) {
       if (ring.types[i] === 'gap') continue;
       const start = getSegmentAngle(ring, i, difficulty);
-      order.push({ i, start, depth: Math.sin(start + segAngle * 0.44) });
+      const depth = Math.sin(start + segAngle * 0.44);
+      let j = n++;
+      while (j > 0 && _od[j - 1] > depth) {
+        _od[j] = _od[j - 1]; _os[j] = _os[j - 1]; _oi[j] = _oi[j - 1];
+        j--;
+      }
+      _od[j] = depth; _os[j] = start; _oi[j] = i;
     }
-    order.sort((a, b) => a.depth - b.depth);
 
-    for (const s of order) {
-      const type = ring.types[s.i];
+    for (let k = 0; k < n; k++) {
+      const i = _oi[k], start = _os[k];
+      const type = ring.types[i];
       let glow, alpha;
 
       if (type === 'deadly') {
-        const pulse = 0.75 + 0.25 * Math.sin(t * 4 + s.i);
+        const pulse = 0.75 + 0.25 * Math.sin(t * 4 + i);
         glow  = 18 * pulse;
         alpha = depthAlpha * (0.85 + 0.15 * pulse);
       } else if (type === 'powerup') {
-        const pulse = 0.65 + 0.35 * Math.sin(t * 7 + s.i * 0.8);
+        const pulse = 0.65 + 0.35 * Math.sin(t * 7 + i * 0.8);
         glow  = 16 * pulse;
         alpha = depthAlpha * (0.75 + 0.25 * pulse);
       } else {
         // Safe segment — subtle brightness shimmer
         glow  = 10;
-        alpha = depthAlpha * (0.94 + 0.06 * Math.sin(t * 2 + s.i * 0.5));
+        alpha = depthAlpha * (0.94 + 0.06 * Math.sin(t * 2 + i * 0.5));
       }
 
-      drawArc3D(ctx, geo, s.start, s.start + segAngle * 0.88, shadeFor(type), glow, alpha);
+      drawArc3D(ctx, geo, start, start + segAngle * 0.88, shadeFor(type), glow, alpha);
     }
   }
 

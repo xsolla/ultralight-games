@@ -25,10 +25,21 @@ const C = {
   RING_RY_SLOPE: 0.042,     // extra vertical radius per px below the horizon
   // Near half of the ring projects larger than the far half. 0 = flat ellipse.
   RING_PERSPECTIVE: 0.28,
-  RING_STEPS: 12,           // samples per segment when building the tube ribbon
+  // Samples per segment when building the tube ribbon is a quality knob now
+  // (QUALITY[tier].ringSteps); this is only the ceiling that sizes the scratch
+  // geometry buffers, so it must stay >= the largest tier's ringSteps.
+  MAX_RING_STEPS: 12,
   RING_SHADE_BACK: 0.38,    // lightness multiplier on the far side of the ring
   RING_SHADE_FRONT: 1.16,   // lightness multiplier on the near side
   RING_SPECULAR: 0.35,      // strength of the top-lit highlight along the tube
+  // Bloom: the segment silhouette is filled once more, wider and faint, under the
+  // body. A widened fill of the exact same path reads as a shape-accurate glow at
+  // a fraction of the cost of a Gaussian shadowBlur.
+  // Two bands, outer first, giving a stepped falloff that reads as a soft bloom.
+  // Each entry is [extra half-width in px per unit of glow strength, peak alpha].
+  // Absolute pixels, not a fraction of the tube: `glow` carries the old shadowBlur
+  // radii, so a glow of 10 has to spread about 10px whatever the tube's thickness.
+  RING_HALO_BANDS: [[0.62, 0.13], [0.28, 0.26]],
 
   // --- Ball ---
   BALL_RADIUS: 11,
@@ -108,6 +119,7 @@ const C = {
   PARTICLE_COUNT_DEATH: 30,
   PARTICLE_SPEED: 180,
   PARTICLE_LIFE: 0.55,          // seconds
+  PARTICLE_MAX: 220,            // hard cap — oldest dropped first
 
   // --- Ring destruction ---
   // A ring the ball punches through bursts into one fragment per solid segment.
@@ -127,9 +139,7 @@ const C = {
   SHAKE_DECAY: 8,               // decay per frame multiplier
 
   // --- HUD ---
-  HUD_BTN_SIZE: 38,             // px square
   HUD_MARGIN: 10,
-  HUD_FONT: 'bold 14px monospace',
   SCORE_FONT: 'bold 42px monospace',
 
   // --- Rotation ---
@@ -165,6 +175,71 @@ const C = {
   // --- Title screen ---
   TITLE_HELIX_SPEED: 0.6,       // rotation speed of preview helix
   TITLE_RING_COUNT: 8,
+
+  // --- Adaptive quality ---
+  // Frame time is sampled every frame; sustained slowness steps the tier down and
+  // sustained headroom steps it back up. See quality.js.
+  QUALITY_ORDER: ['high', 'med', 'low'],
+  QUALITY: {
+    high: { ringHaloBands: 2, ringSteps: 8, particleScale: 1.0,  trailLength: 22,
+            starCount: 70, starTwinkle: 15, debrisMax: 64, gasIntervalMult: 1.0, gas: true },
+    med:  { ringHaloBands: 1, ringSteps: 6, particleScale: 0.6,  trailLength: 14,
+            starCount: 45, starTwinkle: 8,  debrisMax: 40, gasIntervalMult: 1.8, gas: true },
+    low:  { ringHaloBands: 0, ringSteps: 5, particleScale: 0.35, trailLength: 8,
+            starCount: 28, starTwinkle: 0,  debrisMax: 22, gasIntervalMult: 3.0, gas: false },
+  },
+  QUALITY_DOWN_MS: 20,          // rolling average above this is too slow
+  QUALITY_UP_MS: 13,            // rolling average below this has headroom to spare
+  QUALITY_DOWN_FRAMES: 45,      // consecutive slow frames before stepping down
+  QUALITY_UP_FRAMES: 90,        // consecutive fast frames before stepping up
+  QUALITY_WINDOW: 30,           // frames in the rolling average
+  QUALITY_WARMUP: 30,           // frames ignored at startup while caches fill
+  QUALITY_UP_COOLDOWN: 3,       // seconds between upward steps, to stop oscillation
+  // A frame this long is a stall — a tab switch, a GC pause, the process being
+  // descheduled — not a slow render, and must not count as evidence. It has to sit
+  // well above any real frame time: a device rendering at 12fps (83ms) still needs
+  // its frames counted, or the tier can never step down for the device that needs
+  // it most. Deliberately NOT tied to the loop's dt clamp for that reason.
+  QUALITY_STALL_MS: 250,
+
+  // --- Shared branding & HUD chrome ---
+  // Copied verbatim from ../branding.md, which is the single source of truth across
+  // the games in this repo. Nothing here may become a cross-game import: the games
+  // ship as standalone folders, so the values are duplicated deliberately.
+  //
+  // The one adaptation: the spec assumes an 800x600 logical space, and this game is
+  // 405x720. Only the *derived* right-edge x changes (CANVAS_W - inset - size);
+  // every appearance value and the y column are unchanged.
+  BRAND_LOGO_X: 28,             // top-left of the visible artwork
+  BRAND_LOGO_Y: 16,
+  BRAND_LOGO_W: 112,            // renders about 112 x 24.3
+  BRAND_LOGO_FILL: '#80EAFF',
+
+  BTN_SIZE: 30,
+  BTN_RADIUS: 8,
+  BTN_INSET: 28,                // right inset -> x = 405 - 28 - 30 = 347
+  BTN_Y0: 16,                   // first button's y; the column steps by SIZE + GAP
+  BTN_GAP: 6,
+  BTN_FILL:         'rgba(255,255,255,0.045)',
+  BTN_FILL_HOVER:   'rgba(255,255,255,0.09)',
+  BTN_STROKE:       'rgba(150,180,220,0.30)',
+  BTN_STROKE_HOVER: 'rgba(150,180,220,0.55)',
+  BTN_LINE_WIDTH: 1,
+  ICON_BRIGHT: '#e6eef8',       // sound in the `on` state only
+  ICON_DIM:    '#8aa0bd',       // everything else
+  ICON_HALF: 8,                 // the spec's nominal half-size `s`
+  ICON_STROKE_SOUND: 1.6,
+  ICON_STROKE_GLYPH: 1.8,       // exit + fullscreen
+
+  // --- Game over panel ---
+  // Single source of truth: the panel is baked, blitted and hit-tested from these,
+  // so a layout tweak cannot leave the clickable rects out of sync with the drawn
+  // ones. All the *_Y values are panel-local (measured from the panel's top edge).
+  GO_PANEL_W: 300,
+  GO_PANEL_H: 376,             // QUIT ends at 340, leaving 36px below it
+  GO_PANEL_DY: -20,            // panel centre offset from the canvas centre
+  GO_PLAY_W: 200, GO_PLAY_H: 52, GO_PLAY_Y: 236,
+  GO_QUIT_W: 130, GO_QUIT_H: 40, GO_QUIT_Y: 300,
 
   // --- Misc ---
   GAMEOVER_DELAY: 800,          // ms before game-over screen appears

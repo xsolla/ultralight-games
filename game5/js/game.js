@@ -58,8 +58,13 @@ const Game = (() => {
 
   function init() {
     canvas = document.getElementById('gameCanvas');
-    ctx = canvas.getContext('2d');
+    // The background fill covers every pixel every frame, so an alpha channel on
+    // the backing store buys nothing and costs on mobile compositing.
+    ctx = canvas.getContext('2d', { alpha: false });
     bestScore = loadBest();
+    Quality.init();
+    Quality.setOnChange(onQualityChange);
+    Glow.warm();
     Input.init();
     HUD.init();
     Title.init();
@@ -67,14 +72,27 @@ const Game = (() => {
     initStars();
     setupCanvasScale();
     window.addEventListener('resize', setupCanvasScale);
+    document.addEventListener('fullscreenchange', setupCanvasScale);
+    document.addEventListener('webkitfullscreenchange', setupCanvasScale);
     canvas.addEventListener('click', onCanvasClick);
     canvas.addEventListener('touchend', onCanvasTouch, { passive: false });
+    // Hover is a mouse-only affordance; touch never sets it.
+    canvas.addEventListener('mousemove', onCanvasHover);
+    canvas.addEventListener('mouseleave', () => { HUD.clearPointer(); setCursor(false); });
     requestAnimationFrame(loop);
   }
 
+  // The starfield is static geometry whose only animation is a per-star alpha
+  // twinkle. Drawing all of it live cost 70 blurred fills a frame. Instead the field
+  // is baked once into an offscreen layer, and only the largest stars — the ones
+  // where the shimmer actually reads — are drawn live on top.
+  let starLayer = null;
+  let twinkleStars = [];
+
   function initStars() {
+    const q = Quality.get();
     stars = [];
-    for (let i = 0; i < 70; i++) {
+    for (let i = 0; i < q.starCount; i++) {
       stars.push({
         x: Math.random() * C.CANVAS_W,
         y: Math.random() * C.CANVAS_H,
@@ -84,12 +102,51 @@ const Game = (() => {
         speed: 0.4 + Math.random() * 1.2,
       });
     }
+    bakeStars();
   }
+
+  function bakeStars() {
+    const q = Quality.get();
+    // Brightest first, so the live-drawn subset is the one worth animating.
+    const byR = stars.slice().sort((a, b) => b.r - a.r);
+    twinkleStars = byR.slice(0, Math.min(q.starTwinkle, byR.length));
+    const baked = byR.slice(twinkleStars.length);
+
+    if (!starLayer) {
+      starLayer = document.createElement('canvas');
+      starLayer.width  = C.CANVAS_W;
+      starLayer.height = C.CANVAS_H;
+    }
+    const g = starLayer.getContext('2d');
+    g.clearRect(0, 0, C.CANVAS_W, C.CANVAS_H);
+    g.globalCompositeOperation = 'lighter';
+    for (const st of baked) {
+      // Baked at mean twinkle brightness — a static star at the average of its
+      // cycle is indistinguishable from one mid-cycle.
+      Glow.draw(g, '#aaddff', st.x, st.y, st.r, st.alpha * 0.75);
+    }
+    g.globalAlpha = 1;
+    g.globalCompositeOperation = 'source-over';
+  }
+
+  // A tier change alters star counts and the trail length, so the baked layer and
+  // anything else sized by the tier is rebuilt.
+  function onQualityChange() {
+    initStars();
+    scoreCache.key = null;
+    gameoverCache.key = null;
+  }
+
+  // Cached so Input.getRotationDelta does not have to call getBoundingClientRect()
+  // every frame, which forces a style/layout flush.
+  let cssScale = 1;
+  function getScale() { return cssScale; }
 
   function setupCanvasScale() {
     const W = C.CANVAS_W, H = C.CANVAS_H;
     const winW = window.innerWidth, winH = window.innerHeight;
     const scale = Math.min(winW / W, winH / H);
+    cssScale = scale || 1;
     canvas.style.width        = W + 'px';
     canvas.style.height       = H + 'px';
     canvas.style.transform    = `scale(${scale})`;
@@ -99,12 +156,29 @@ const Game = (() => {
     canvas.style.top          = Math.floor((winH - H * scale) / 2) + 'px';
   }
 
+  // Click path only — one layout flush per tap is fine, and reading the live rect
+  // keeps taps accurate even if a resize has not been processed yet.
   function getCanvasCoords(clientX, clientY) {
     const rect = canvas.getBoundingClientRect();
     return {
       x: (clientX - rect.left) * (C.CANVAS_W / rect.width),
       y: (clientY - rect.top)  * (C.CANVAS_H / rect.height),
     };
+  }
+
+  function onCanvasHover(e) {
+    const { x, y } = getCanvasCoords(e.clientX, e.clientY);
+    HUD.setPointer(x, y);
+    setCursor(!!HUD.hitTest(x, y, state === STATE.TITLE ? HUD.KINDS_TITLE : HUD.KINDS_GAME));
+  }
+
+  // Only touched on change — assigning canvas.style.cursor every mousemove would
+  // dirty style on each event for nothing.
+  let cursorPointer = false;
+  function setCursor(pointer) {
+    if (pointer === cursorPointer) return;
+    cursorPointer = pointer;
+    canvas.style.cursor = pointer ? 'pointer' : 'default';
   }
 
   function onCanvasClick(e) {
@@ -125,14 +199,18 @@ const Game = (() => {
   function handleInput(x, y) {
     if (state === STATE.TITLE) {
       const action = Title.handleClick(x, y);
-      if (action === 'play') { GameAudio.sfxButtonClick(); startGame(); }
+      if (action === 'play')            { GameAudio.sfxButtonClick(); startGame(); }
+      else if (action === 'sound')      { GameAudio.sfxButtonClick(); cycleSound(); }
+      else if (action === 'fullscreen') { GameAudio.sfxButtonClick(); toggleFullscreen(); }
     } else if (state === STATE.PLAYING || state === STATE.GAMEOVER) {
-      HUD.handleClick(x, y,
+      // The button column sits above the game-over panel, so a tap it consumes
+      // must not also reach the panel underneath.
+      const consumed = HUD.handleClick(x, y,
         () => { GameAudio.sfxButtonClick(); goToTitle(); },
         () => { GameAudio.sfxButtonClick(); toggleFullscreen(); },
-        () => { GameAudio.sfxButtonClick(); HUD.cycleSound(); GameAudio.applyMode(HUD.getSoundMode()); }
+        () => { GameAudio.sfxButtonClick(); cycleSound(); }
       );
-      if (state === STATE.GAMEOVER && gameoverVisible) handleGameoverClick(x, y);
+      if (!consumed && state === STATE.GAMEOVER && gameoverVisible) handleGameoverClick(x, y);
     }
   }
 
@@ -158,6 +236,11 @@ const Game = (() => {
     GameAudio.applyMode(HUD.getSoundMode());
   }
 
+  function cycleSound() {
+    HUD.cycleSound();
+    GameAudio.applyMode(HUD.getSoundMode());
+  }
+
   function goToTitle() {
     GameAudio.stopGameMusic();
     persistBest();
@@ -167,13 +250,21 @@ const Game = (() => {
 
   function loop(timestamp) {
     if (lastTime === 0) lastTime = timestamp;   // first frame has no elapsed time
-    const dt = Math.min((timestamp - lastTime) / 1000, 0.05);
+    const raw = timestamp - lastTime;
+    const dt = Math.min(raw / 1000, 0.05);
     lastTime = timestamp;
     elapsed += dt;
+    // Only an outright stall is excluded from the sample. Using the dt clamp here
+    // would dismiss every frame on a device rendering slower than 20fps, which is
+    // precisely the device the tier system exists to help.
+    Quality.sample(raw, raw >= C.QUALITY_STALL_MS);
+    frameMs = frameMs * 0.9 + raw * 0.1;
     update(dt);
     render();
     requestAnimationFrame(loop);
   }
+
+  let frameMs = 0;
 
   function update(dt) {
     if (state === STATE.TITLE) { Title.update(dt); return; }
@@ -249,7 +340,8 @@ const Game = (() => {
   }
 
   function updateStars(dt) {
-    stars.forEach(s => { s.twinkle += s.speed * dt; });
+    // Only the live-drawn subset animates; the rest is baked into starLayer.
+    for (const st of twinkleStars) st.twinkle += st.speed * dt;
   }
 
   function checkCollisions() {
@@ -368,7 +460,9 @@ const Game = (() => {
 
   function emitPassParticles(ballY) {
     const hue = (C.RING_HUE_START + score * C.RING_HUE_SCORE_SCALE) % 360;
-    Particles.emitRing(C.TOWER_CX, ballY, `hsl(${hue}, 100%, 65%)`);
+    // Quantized: the hue drifts continuously with score, and an unbounded set of
+    // colour strings would mean an unbounded set of baked glow sprites.
+    Particles.emitRing(C.TOWER_CX, ballY, Glow.quantHue(hue, 100, 65));
   }
 
   function applyPowerup(type, y) {
@@ -396,25 +490,48 @@ const Game = (() => {
     persistBest();
   }
 
+  // Screen-space top-left of the panel. Shared by the blit and the hit test.
+  function gameoverPanelOrigin() {
+    return {
+      x: C.CANVAS_W / 2 - C.GO_PANEL_W / 2,
+      y: C.CANVAS_H / 2 - C.GO_PANEL_H / 2 + C.GO_PANEL_DY,
+    };
+  }
+
   function handleGameoverClick(x, y) {
+    const o = gameoverPanelOrigin();
     const cx = C.CANVAS_W / 2;
-    const paW = 200, paH = 52;
-    const pw = 300, ph = 340;
-    const px = cx - pw / 2, py = C.CANVAS_H / 2 - ph / 2 - 20;
-    const paX = cx - paW / 2, paY = py + 236;
-    if (x >= paX && x <= paX + paW && y >= paY && y <= paY + paH) {
+
+    const paX = cx - C.GO_PLAY_W / 2, paY = o.y + C.GO_PLAY_Y;
+    if (x >= paX && x <= paX + C.GO_PLAY_W && y >= paY && y <= paY + C.GO_PLAY_H) {
       GameAudio.sfxButtonClick(); startGame(); return;
     }
-    const qW = 130, qH = 40;
-    const qX = cx - qW / 2, qY = py + 300;
-    if (x >= qX && x <= qX + qW && y >= qY && y <= qY + qH) {
+
+    const qX = cx - C.GO_QUIT_W / 2, qY = o.y + C.GO_QUIT_Y;
+    if (x >= qX && x <= qX + C.GO_QUIT_W && y >= qY && y <= qY + C.GO_QUIT_H) {
       GameAudio.sfxButtonClick(); goToTitle();
     }
   }
 
+  // Read live from the document rather than tracking a flag, so leaving fullscreen
+  // via Esc or F11 keeps the button's glyph in sync for free.
+  function isFullscreen() {
+    return !!(document.fullscreenElement || document.webkitFullscreenElement);
+  }
+
+  // Toggles the <html> element, not the canvas: the UA stylesheet forces a
+  // fullscreen element to 100% width/height, which would break the fixed-size box
+  // this game's transform-based scaling is built on.
   function toggleFullscreen() {
-    if (!document.fullscreenElement) document.documentElement.requestFullscreen().catch(() => {});
-    else document.exitFullscreen().catch(() => {});
+    if (isFullscreen()) {
+      const exit = document.exitFullscreen || document.webkitExitFullscreen;
+      if (exit) { const p = exit.call(document); if (p && p.catch) p.catch(() => {}); }
+      return;
+    }
+    const el = document.documentElement;
+    const req = el.requestFullscreen || el.webkitRequestFullscreen;
+    // Rejects when the embedding page withholds allow="fullscreen".
+    if (req) { const p = req.call(el); if (p && p.catch) p.catch(() => {}); }
   }
 
   // ── Rendering ──────────────────────────────────────────────────────────────
@@ -435,18 +552,16 @@ const Game = (() => {
     ctx.fillStyle = bgGrad;
     ctx.fillRect(0, 0, C.CANVAS_W, C.CANVAS_H);
 
-    stars.forEach(s => {
-      const a = s.alpha * (0.5 + 0.5 * Math.sin(s.twinkle));
-      ctx.save();
-      ctx.globalAlpha = a;
-      ctx.fillStyle = '#ffffff';
-      ctx.shadowBlur = s.r * 4;
-      ctx.shadowColor = '#aaddff';
-      ctx.beginPath();
-      ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.restore();
-    });
+    if (starLayer) ctx.drawImage(starLayer, 0, 0);
+    if (twinkleStars.length) {
+      ctx.globalCompositeOperation = 'lighter';
+      for (const st of twinkleStars) {
+        Glow.draw(ctx, '#aaddff', st.x, st.y, st.r,
+                  st.alpha * (0.5 + 0.5 * Math.sin(st.twinkle)));
+      }
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.globalAlpha = 1;
+    }
 
     // Speed-up flash — red edge vignette
     if (speedFlash > 0) {
@@ -474,16 +589,15 @@ const Game = (() => {
   }
 
   // Horizontal flash bar at ball Y when passing through a ring
+  // A baked falloff strip stands in for the bar's 20px shadow — one blit, and a
+  // genuinely smooth gradient rather than the visible steps stacked bands left.
+  const FLASH_HALF = 22;
+
   function drawRingFlash() {
     if (ringFlash <= 0) return;
-    const ballY = Ball.getY();
-    ctx.save();
-    ctx.globalAlpha = ringFlash * 0.55;
-    ctx.fillStyle   = ringFlashColor;
-    ctx.shadowBlur  = 20;
-    ctx.shadowColor = ringFlashColor;
-    ctx.fillRect(0, ballY - 3, C.CANVAS_W, 6);
-    ctx.restore();
+    Glow.drawBar(ctx, ringFlashColor, Ball.getY(), FLASH_HALF, C.CANVAS_W,
+                 ringFlash * 0.7);
+    ctx.globalAlpha = 1;
   }
 
   // Thin speed bar at bottom of screen
@@ -504,9 +618,12 @@ const Game = (() => {
     // Fill — hue shifts cyan → red as speed increases
     if (pct > 0) {
       const barHue = 180 - pct * 160;
+      // A faint wider band replaces the 6px shadow — imperceptible on a 3px bar.
+      ctx.fillStyle   = `hsl(${barHue}, 100%, 65%)`;
+      ctx.globalAlpha = 0.22;
+      roundRect(ctx, bx, by - 2, barW * pct, barH + 4, 3);
+      ctx.fill();
       ctx.fillStyle   = `hsl(${barHue}, 100%, 55%)`;
-      ctx.shadowBlur  = 6;
-      ctx.shadowColor = `hsl(${barHue}, 100%, 65%)`;
       ctx.globalAlpha = 0.7;
       roundRect(ctx, bx, by, barW * pct, barH, 2);
       ctx.fill();
@@ -515,152 +632,223 @@ const Game = (() => {
   }
 
   // Combo display
+  // Only the alpha animates between ring passes, so the glowing label is baked per
+  // combo value and blitted.
+  const comboCache = { key: null, canvas: null };
+
   function drawCombo() {
     if (combo < 2) return;
     const cx    = C.CANVAS_W / 2;
     const alpha = Math.min(1, comboTimer / 0.6);
-    ctx.save();
-    ctx.globalAlpha  = alpha * 0.9;
-    ctx.textAlign    = 'center';
-    ctx.textBaseline = 'middle';
-    const comboScale = 1 + Math.min(combo * 0.04, 0.5);
-    ctx.font         = `bold ${Math.floor(15 * comboScale)}px monospace`;
-    ctx.shadowBlur   = 14;
-    ctx.shadowColor  = C.POWERUP_MULT_COLOR;
-    ctx.fillStyle    = C.POWERUP_MULT_COLOR;
-    ctx.fillText(`${combo}×  COMBO`, cx, C.TOWER_BALL_Y - 40);
-    ctx.restore();
+    const key   = String(combo);
+
+    if (comboCache.key !== key) {
+      if (!comboCache.canvas) comboCache.canvas = document.createElement('canvas');
+      const c = comboCache.canvas;
+      const w = 220, h = 60;
+      if (c.width !== w || c.height !== h) { c.width = w; c.height = h; }
+      const g = c.getContext('2d');
+      g.clearRect(0, 0, w, h);
+      g.textAlign    = 'center';
+      g.textBaseline = 'middle';
+      const comboScale = 1 + Math.min(combo * 0.04, 0.5);
+      g.font         = `bold ${Math.floor(15 * comboScale)}px monospace`;
+      g.shadowBlur   = 14;
+      g.shadowColor  = C.POWERUP_MULT_COLOR;
+      g.fillStyle    = C.POWERUP_MULT_COLOR;
+      g.fillText(`${combo}×  COMBO`, w / 2, h / 2);
+      comboCache.key = key;
+    }
+
+    const c = comboCache.canvas;
+    ctx.globalAlpha = alpha * 0.9;
+    ctx.drawImage(c, cx - c.width / 2, C.TOWER_BALL_Y - 40 - c.height / 2);
+    ctx.globalAlpha = 1;
+  }
+
+  // The score glyphs carry a 24px glow, and the string changes at most a few times a
+  // second while the frame redraws sixty. Bake on change, blit otherwise; scorePop is
+  // applied through the blit's destination size so the pop costs nothing extra.
+  const scoreCache = { key: null, canvas: null, w: 0, h: 0 };
+  const SCORE_PAD = 34;   // room for the glow around the glyphs
+
+  function bakeScore() {
+    const key = score + '|' + (newBest ? 1 : 0) + '|' + (multActive ? 1 : 0);
+    if (scoreCache.key === key) return;
+
+    if (!scoreCache.canvas) scoreCache.canvas = document.createElement('canvas');
+    const c = scoreCache.canvas;
+    // Width is generous: the widest score plus glow padding on both sides.
+    const w = 260, h = 110;
+    if (c.width !== w || c.height !== h) { c.width = w; c.height = h; }
+    const g = c.getContext('2d');
+    g.clearRect(0, 0, w, h);
+
+    g.textAlign    = 'center';
+    g.textBaseline = 'top';
+    g.font         = C.SCORE_FONT;
+    g.shadowBlur   = 24;
+    g.shadowColor  = multActive ? C.POWERUP_MULT_COLOR : '#00e5ff';
+    g.fillStyle    = multActive ? C.POWERUP_MULT_COLOR : '#ffffff';
+    g.fillText(score, w / 2, SCORE_PAD);
+
+    if (newBest) {
+      g.font        = 'bold 11px monospace';
+      g.shadowBlur  = 8;
+      g.shadowColor = C.POWERUP_MULT_COLOR;
+      g.fillStyle   = C.POWERUP_MULT_COLOR;
+      g.fillText('NEW BEST', w / 2, SCORE_PAD + 50);
+    }
+
+    scoreCache.key = key;
+    scoreCache.w = w;
+    scoreCache.h = h;
   }
 
   function drawScore() {
+    bakeScore();
     const cx  = C.CANVAS_W / 2;
-    const top = C.HUD_MARGIN + 2;
-
-    ctx.save();
-    ctx.textAlign    = 'center';
-    ctx.textBaseline = 'top';
+    const top = C.HUD_MARGIN + 2 - SCORE_PAD;
+    const w = scoreCache.w, h = scoreCache.h;
 
     if (scorePop !== 1) {
-      ctx.translate(cx, top + 24);
-      ctx.scale(scorePop, scorePop);
-      ctx.translate(-cx, -(top + 24));
+      // Pop about the same anchor the live-drawn version used.
+      const ax = cx, ay = C.HUD_MARGIN + 2 + 24;
+      const dw = w * scorePop, dh = h * scorePop;
+      ctx.drawImage(scoreCache.canvas,
+        ax - (ax - (cx - w / 2)) * scorePop, ay - (ay - top) * scorePop, dw, dh);
+    } else {
+      ctx.drawImage(scoreCache.canvas, cx - w / 2, top, w, h);
+    }
+  }
+
+  // The game-over panel is a stack of glowing text and gradient buttons that never
+  // changes once it appears — score, best and newBest are all fixed at death. Bake
+  // the whole panel once and blit it; only the dimming overlay is drawn live.
+  const gameoverCache = { key: null, canvas: null };
+  const GO_PAD = 50;   // room for the panel's 40px glow
+
+  function bakeGameover() {
+    const pw = C.GO_PANEL_W, ph = C.GO_PANEL_H;
+    const key = score + '|' + bestScore + '|' + (newBest ? 1 : 0);
+    if (gameoverCache.key === key) return;
+
+    if (!gameoverCache.canvas) gameoverCache.canvas = document.createElement('canvas');
+    const c = gameoverCache.canvas;
+    const w = pw + GO_PAD * 2, h = ph + GO_PAD * 2;
+    if (c.width !== w || c.height !== h) { c.width = w; c.height = h; }
+    const g = c.getContext('2d');
+    // This canvas is reused across runs, and getContext hands back the *same*
+    // context with whatever transform the last bake left on it. Reset before
+    // clearing: clearRect works in the current transform space, so an inherited
+    // translate would clear the wrong region and leave the previous panel behind.
+    g.setTransform(1, 0, 0, 1, 0, 0);
+    g.clearRect(0, 0, w, h);
+    // Draw in panel-local coordinates: origin at the panel's top-left.
+    g.save();
+    g.translate(GO_PAD, GO_PAD);
+
+    const cx = pw / 2;
+    const isNewBest = newBest;
+
+    // Panel
+    g.fillStyle   = 'rgba(10,10,30,0.88)';
+    g.strokeStyle = isNewBest ? 'rgba(255,215,0,0.35)' : 'rgba(255,255,255,0.1)';
+    g.lineWidth   = isNewBest ? 2 : 1.5;
+    g.shadowBlur  = isNewBest ? 30 : 40;
+    g.shadowColor = isNewBest ? C.POWERUP_MULT_COLOR : C.DEADLY_COLOR;
+    roundRect(g, 0, 0, pw, ph, 20);
+    g.fill();
+    g.shadowBlur = 0;
+    g.stroke();
+
+    // GAME OVER
+    g.textAlign   = 'center';
+    g.font        = 'bold 52px monospace';
+    g.shadowBlur  = 28;
+    g.shadowColor = C.DEADLY_COLOR;
+    g.fillStyle   = '#ffffff';
+    g.fillText('GAME', cx, 60);
+    g.fillStyle   = C.DEADLY_COLOR;
+    g.fillText('OVER', cx, 118);
+
+    // Score
+    g.shadowColor = isNewBest ? C.POWERUP_MULT_COLOR : '#00e5ff';
+    g.shadowBlur  = 18;
+    g.fillStyle   = isNewBest ? C.POWERUP_MULT_COLOR : '#ffffff';
+    g.font        = 'bold 30px monospace';
+    g.fillText(score, cx, 166);
+
+    if (isNewBest) {
+      g.font       = 'bold 12px monospace';
+      g.shadowBlur = 10;
+      g.fillStyle  = C.POWERUP_MULT_COLOR;
+      g.fillText('★  NEW BEST  ★', cx, 200);
+    } else {
+      g.font       = 'bold 13px monospace';
+      g.shadowBlur = 0;
+      g.fillStyle  = 'rgba(255,255,255,0.4)';
+      g.fillText(`BEST  ${bestScore}`, cx, 202);
     }
 
-    ctx.font        = C.SCORE_FONT;
-    ctx.shadowBlur  = 24;
-    ctx.shadowColor = multActive ? C.POWERUP_MULT_COLOR : '#00e5ff';
-    ctx.fillStyle   = multActive ? C.POWERUP_MULT_COLOR : '#ffffff';
-    ctx.fillText(score, cx, top);
+    // Divider
+    g.strokeStyle = 'rgba(255,255,255,0.1)';
+    g.lineWidth   = 1;
+    g.shadowBlur  = 0;
+    g.beginPath();
+    g.moveTo(30, 222);
+    g.lineTo(pw - 30, 222);
+    g.stroke();
 
-    if (newBest) {
-      ctx.font       = 'bold 11px monospace';
-      ctx.shadowBlur = 8;
-      ctx.shadowColor = C.POWERUP_MULT_COLOR;
-      ctx.fillStyle  = C.POWERUP_MULT_COLOR;
-      ctx.fillText('NEW BEST', cx, top + 50);
-    }
+    // Play Again
+    const paW = C.GO_PLAY_W, paH = C.GO_PLAY_H;
+    const paX = cx - paW / 2, paY = C.GO_PLAY_Y;
+    const paGrad = g.createLinearGradient(paX, paY, paX, paY + paH);
+    paGrad.addColorStop(0, '#00c8e0');
+    paGrad.addColorStop(1, '#007a96');
+    g.shadowBlur  = 18;
+    g.shadowColor = '#00e5ff';
+    g.fillStyle   = paGrad;
+    roundRect(g, paX, paY, paW, paH, 13);
+    g.fill();
+    g.strokeStyle = 'rgba(255,255,255,0.28)';
+    g.lineWidth   = 1.5;
+    g.shadowBlur  = 0;
+    roundRect(g, paX, paY, paW, paH, 13);
+    g.stroke();
+    g.fillStyle   = '#ffffff';
+    g.font        = 'bold 19px monospace';
+    g.shadowBlur  = 10;
+    g.shadowColor = '#ffffff';
+    g.fillText('▶  PLAY AGAIN', cx, paY + paH / 2 + 1);
 
-    ctx.restore();
+    // Quit
+    const qW = C.GO_QUIT_W, qH = C.GO_QUIT_H;
+    const qX = cx - qW / 2, qY = C.GO_QUIT_Y;
+    g.shadowBlur  = 0;
+    g.fillStyle   = 'rgba(255,255,255,0.07)';
+    g.strokeStyle = 'rgba(255,255,255,0.14)';
+    g.lineWidth   = 1;
+    roundRect(g, qX, qY, qW, qH, 10);
+    g.fill();
+    g.stroke();
+    g.fillStyle  = 'rgba(255,255,255,0.48)';
+    g.font       = 'bold 14px monospace';
+    g.fillText('QUIT', cx, qY + qH / 2 + 1);
+
+    g.restore();
+    gameoverCache.key = key;
   }
 
   function drawGameover() {
     if (!gameoverVisible) return;
-    const cx  = C.CANVAS_W / 2;
-    const pw  = 300, ph = 340;
-    const px  = cx - pw / 2, py = C.CANVAS_H / 2 - ph / 2 - 20;
-    const isNewBest = newBest;
+    bakeGameover();
 
-    ctx.save();
+    const o = gameoverPanelOrigin();
 
-    // Overlay
     ctx.fillStyle = 'rgba(0,0,0,0.68)';
     ctx.fillRect(0, 0, C.CANVAS_W, C.CANVAS_H);
-
-    // Panel
-    ctx.fillStyle   = 'rgba(10,10,30,0.88)';
-    ctx.strokeStyle = isNewBest ? `rgba(255,215,0,0.35)` : 'rgba(255,255,255,0.1)';
-    ctx.lineWidth   = isNewBest ? 2 : 1.5;
-    ctx.shadowBlur  = isNewBest ? 30 : 40;
-    ctx.shadowColor = isNewBest ? C.POWERUP_MULT_COLOR : C.DEADLY_COLOR;
-    roundRect(ctx, px, py, pw, ph, 20);
-    ctx.fill();
-    ctx.shadowBlur = 0;
-    ctx.stroke();
-
-    // GAME OVER
-    ctx.textAlign   = 'center';
-    ctx.font        = 'bold 52px monospace';
-    ctx.shadowBlur  = 28;
-    ctx.shadowColor = C.DEADLY_COLOR;
-    ctx.fillStyle   = '#ffffff';
-    ctx.fillText('GAME', cx, py + 60);
-    ctx.fillStyle   = C.DEADLY_COLOR;
-    ctx.fillText('OVER', cx, py + 118);
-
-    // Score
-    ctx.shadowColor = isNewBest ? C.POWERUP_MULT_COLOR : '#00e5ff';
-    ctx.shadowBlur  = 18;
-    ctx.fillStyle   = isNewBest ? C.POWERUP_MULT_COLOR : '#ffffff';
-    ctx.font        = 'bold 30px monospace';
-    ctx.fillText(score, cx, py + 166);
-
-    if (isNewBest) {
-      ctx.font       = 'bold 12px monospace';
-      ctx.shadowBlur = 10;
-      ctx.fillStyle  = C.POWERUP_MULT_COLOR;
-      ctx.fillText('★  NEW BEST  ★', cx, py + 200);
-    } else {
-      ctx.font       = 'bold 13px monospace';
-      ctx.shadowBlur = 0;
-      ctx.fillStyle  = 'rgba(255,255,255,0.4)';
-      ctx.fillText(`BEST  ${bestScore}`, cx, py + 202);
-    }
-
-    // Divider
-    ctx.strokeStyle = 'rgba(255,255,255,0.1)';
-    ctx.lineWidth   = 1;
-    ctx.beginPath();
-    ctx.moveTo(px + 30, py + 222);
-    ctx.lineTo(px + pw - 30, py + 222);
-    ctx.stroke();
-
-    // Play Again
-    const paW = 200, paH = 52;
-    const paX = cx - paW / 2, paY = py + 236;
-    const paGrad = ctx.createLinearGradient(paX, paY, paX, paY + paH);
-    paGrad.addColorStop(0, '#00c8e0');
-    paGrad.addColorStop(1, '#007a96');
-    ctx.shadowBlur  = 18;
-    ctx.shadowColor = '#00e5ff';
-    ctx.fillStyle   = paGrad;
-    roundRect(ctx, paX, paY, paW, paH, 13);
-    ctx.fill();
-    ctx.strokeStyle = 'rgba(255,255,255,0.28)';
-    ctx.lineWidth   = 1.5;
-    ctx.shadowBlur  = 0;
-    roundRect(ctx, paX, paY, paW, paH, 13);
-    ctx.stroke();
-    ctx.fillStyle   = '#ffffff';
-    ctx.font        = 'bold 19px monospace';
-    ctx.shadowBlur  = 10;
-    ctx.shadowColor = '#ffffff';
-    ctx.fillText('▶  PLAY AGAIN', cx, paY + paH / 2 + 1);
-
-    // Quit
-    const qW = 130, qH = 40;
-    const qX = cx - qW / 2, qY = py + 300;
-    ctx.shadowBlur  = 0;
-    ctx.fillStyle   = 'rgba(255,255,255,0.07)';
-    ctx.strokeStyle = 'rgba(255,255,255,0.14)';
-    ctx.lineWidth   = 1;
-    roundRect(ctx, qX, qY, qW, qH, 10);
-    ctx.fill();
-    ctx.stroke();
-    ctx.fillStyle  = 'rgba(255,255,255,0.48)';
-    ctx.font       = 'bold 14px monospace';
-    ctx.fillText('QUIT', cx, qY + qH / 2 + 1);
-
-    ctx.restore();
+    ctx.drawImage(gameoverCache.canvas, o.x - GO_PAD, o.y - GO_PAD);
   }
 
   function roundRect(ctx, x, y, w, h, r) {
@@ -678,9 +866,13 @@ const Game = (() => {
   }
 
   function render() {
-    ctx.clearRect(0, 0, C.CANVAS_W, C.CANVAS_H);
-
-    if (state === STATE.TITLE) { Title.draw(ctx); return; }
+    // No clearRect: both states paint an opaque full-screen background first, and
+    // the context has no alpha channel to clear.
+    if (state === STATE.TITLE) {
+      Title.draw(ctx);
+      if (DEBUG) drawDebug();
+      return;
+    }
 
     ctx.save();
     if (shakeMag > 0.3) ctx.translate(shakeX, shakeY);
@@ -694,12 +886,52 @@ const Game = (() => {
     drawCombo();
     drawScore();
     drawSpeedBar();
-    HUD.draw(ctx, multActive, Ball.hasShield(), slowActive, purpleActive);
 
     if (state === STATE.GAMEOVER) drawGameover();
 
+    // Last, so the button column stays legible above the game-over overlay —
+    // it dims everything under it by 68%, and the buttons remain live there.
+    HUD.draw(ctx, multActive, Ball.hasShield(), slowActive, purpleActive);
+
+    ctx.restore();
+
+    if (DEBUG) drawDebug();
+  }
+
+  // ── Debug overlay ─────────────────────────────────────────────────────────
+  // Instrumentation for profiling on device. Gated behind ?debug so it never ships
+  // to players.
+  const DEBUG = (() => {
+    try { return /[?&]debug(?:=|&|$)/.test(location.search); } catch (e) { return false; }
+  })();
+
+  function drawDebug() {
+    let visibleRings = 0;
+    if (state !== STATE.TITLE) {
+      for (const r of Helix.getRings()) {
+        if (r.y >= -C.RING_SPACING && r.y <= C.CANVAS_H + C.RING_SPACING) visibleRings++;
+      }
+    }
+    const lines = [
+      `${frameMs.toFixed(1)}ms  (${(1000 / Math.max(frameMs, 0.001)).toFixed(0)}fps)`,
+      `tier ${Quality.name()}  avg ${Quality.avgMs().toFixed(1)}ms`,
+      `rings ${visibleRings}  debris ${Debris.count()}`,
+      `parts ${Particles.count()}  sprites ${Glow.count()}`,
+    ];
+
+    ctx.save();
+    ctx.globalAlpha = 0.85;
+    ctx.fillStyle = 'rgba(0,0,0,0.6)';
+    ctx.fillRect(6, C.CANVAS_H - 74, 186, 68);
+    ctx.font = '11px monospace';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'top';
+    ctx.fillStyle = frameMs > 20 ? '#ff6b6b' : '#8fe388';
+    for (let i = 0; i < lines.length; i++) {
+      ctx.fillText(lines[i], 12, C.CANVAS_H - 70 + i * 16);
+    }
     ctx.restore();
   }
 
-  return { init, getTime };
+  return { init, getTime, getScale, isFullscreen };
 })();

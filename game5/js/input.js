@@ -76,8 +76,9 @@ const Input = (() => {
     if (state.right) delta += C.ROTATE_SPEED_KB * dt;
 
     // Pointer deltas arrive in client px; convert to canvas px via the CSS scale.
-    const rect  = canvas.getBoundingClientRect();
-    const scale = rect.width / C.CANVAS_W || 1;
+    // Read from Game's cached value — calling getBoundingClientRect() here forces a
+    // style/layout flush on every single frame.
+    const scale = Game.getScale();
     delta += ((state.touchDeltaX + state.mouseDeltaX) / scale) * C.ROTATE_SPEED_TOUCH;
 
     // consume pointer deltas each frame

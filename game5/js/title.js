@@ -26,7 +26,9 @@ const Title = (() => {
     });
 
     stars = [];
-    for (let i = 0; i < 80; i++) {
+    // Ten more than the gameplay field, matching the density the title had.
+    const starCount = Quality.get().starCount + 10;
+    for (let i = 0; i < starCount; i++) {
       stars.push({
         x: Math.random() * C.CANVAS_W,
         y: Math.random() * C.CANVAS_H,
@@ -70,31 +72,32 @@ const Title = (() => {
 
   // ── Draw sections ─────────────────────────────────────────────────────────
 
+  // Fixed geometry — built once, not every frame.
+  let bgGrad = null;
+
   function drawBackground(ctx) {
     // Deep space radial gradient
-    const grad = ctx.createRadialGradient(
-      C.CANVAS_W / 2, C.CANVAS_H * 0.38, 40,
-      C.CANVAS_W / 2, C.CANVAS_H / 2,    C.CANVAS_H * 0.9
-    );
-    grad.addColorStop(0,   '#101030');
-    grad.addColorStop(0.5, '#080818');
-    grad.addColorStop(1,   '#030308');
-    ctx.fillStyle = grad;
+    if (!bgGrad) {
+      bgGrad = ctx.createRadialGradient(
+        C.CANVAS_W / 2, C.CANVAS_H * 0.38, 40,
+        C.CANVAS_W / 2, C.CANVAS_H / 2,    C.CANVAS_H * 0.9
+      );
+      bgGrad.addColorStop(0,   '#101030');
+      bgGrad.addColorStop(0.5, '#080818');
+      bgGrad.addColorStop(1,   '#030308');
+    }
+    ctx.fillStyle = bgGrad;
     ctx.fillRect(0, 0, C.CANVAS_W, C.CANVAS_H);
 
-    // Stars
-    stars.forEach(s => {
-      const a = s.alpha * (0.5 + 0.5 * Math.sin(s.twinkle));
-      ctx.save();
-      ctx.globalAlpha  = a;
-      ctx.fillStyle    = '#ffffff';
-      ctx.shadowBlur   = s.r * 3;
-      ctx.shadowColor  = '#aaddff';
-      ctx.beginPath();
-      ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.restore();
-    });
+    // Stars — baked glow sprites in one additive batch. These drift downward, so
+    // unlike the gameplay field they cannot be baked into a static layer.
+    ctx.globalCompositeOperation = 'lighter';
+    for (const st of stars) {
+      Glow.draw(ctx, '#aaddff', st.x, st.y, st.r,
+                st.alpha * (0.5 + 0.5 * Math.sin(st.twinkle)));
+    }
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.globalAlpha = 1;
   }
 
   function drawHelixPreview(ctx) {
@@ -137,150 +140,219 @@ const Title = (() => {
     }
   }
 
-  function drawLogo(ctx) {
+  // The logo's two words carry 28-35px glows and never change. Baked once at full
+  // glow; the breathing is reproduced by cross-fading the blit's alpha, which is
+  // what the animated shadowBlur was doing to the eye anyway.
+  let logoLayer = null, haloGrad = null;
+  const LOGO_TOP = 30, LOGO_H = 150;
+
+  function bakeLogo(ctx) {
+    if (logoLayer) return;
+    logoLayer = document.createElement('canvas');
+    logoLayer.width  = C.CANVAS_W;
+    logoLayer.height = LOGO_H;
+    const g = logoLayer.getContext('2d');
     const cx = C.CANVAS_W / 2;
-
-    // Glow halo behind text
-    ctx.save();
-    ctx.globalAlpha = 0.18 * logoGlow;
-    const halo = ctx.createRadialGradient(cx, 118, 10, cx, 118, 110);
-    halo.addColorStop(0, '#00e5ff');
-    halo.addColorStop(1, 'transparent');
-    ctx.fillStyle = halo;
-    ctx.fillRect(cx - 140, 30, 280, 160);
-    ctx.restore();
-
-    ctx.save();
-    ctx.textAlign = 'center';
+    g.translate(0, -LOGO_TOP);
+    g.textAlign = 'center';
 
     // "HELIX"
-    ctx.font        = 'bold 64px monospace';
-    ctx.shadowBlur  = 35 * logoGlow;
-    ctx.shadowColor = '#00e5ff';
-    ctx.fillStyle   = '#ffffff';
-    ctx.fillText('HELIX', cx, 96);
+    g.font        = 'bold 64px monospace';
+    g.shadowBlur  = 35;
+    g.shadowColor = '#00e5ff';
+    g.fillStyle   = '#ffffff';
+    g.fillText('HELIX', cx, 96);
 
     // "FALL" — cyan, slightly smaller
-    ctx.font        = 'bold 54px monospace';
-    ctx.shadowBlur  = 28 * logoGlow;
-    ctx.shadowColor = '#ffffff';
-    ctx.fillStyle   = '#00e5ff';
-    ctx.fillText('FALL', cx, 150);
+    g.font        = 'bold 54px monospace';
+    g.shadowBlur  = 28;
+    g.shadowColor = '#ffffff';
+    g.fillStyle   = '#00e5ff';
+    g.fillText('FALL', cx, 150);
+  }
+
+  function drawLogo(ctx) {
+    const cx = C.CANVAS_W / 2;
+    bakeLogo(ctx);
+
+    // Glow halo behind text
+    if (!haloGrad) {
+      haloGrad = ctx.createRadialGradient(cx, 118, 10, cx, 118, 110);
+      haloGrad.addColorStop(0, '#00e5ff');
+      haloGrad.addColorStop(1, 'rgba(0,229,255,0)');
+    }
+    ctx.globalAlpha = 0.18 * logoGlow;
+    ctx.fillStyle = haloGrad;
+    ctx.fillRect(cx - 140, 30, 280, 160);
+
+    // Breathe between a dim and a full-strength blit rather than re-blurring.
+    ctx.globalAlpha = 0.72 + 0.28 * logoGlow;
+    ctx.drawImage(logoLayer, 0, LOGO_TOP);
+    ctx.globalAlpha = 1;
 
     // Thin rule under logo
+    ctx.save();
     ctx.globalAlpha = 0.25;
     ctx.strokeStyle = '#00e5ff';
     ctx.lineWidth   = 1;
-    ctx.shadowBlur  = 0;
     ctx.beginPath();
     ctx.moveTo(cx - 100, 162);
     ctx.lineTo(cx + 100, 162);
     ctx.stroke();
-
     ctx.restore();
   }
 
+  const DIFFS  = ['easy', 'normal', 'hard'];
+  const LABELS = ['EASY', 'NORMAL', 'HARD'];
+  const COLORS = ['#69ff47', '#00e5ff', '#ff1744'];
+  const DIFF_PAD = 20;
+
+  // Six static faces (three buttons x selected/unselected), baked on first use.
+  const diffCache = new Map();
+
+  function diffSprite(i, w, h, active) {
+    const key = i + ':' + (active ? 1 : 0);
+    let c = diffCache.get(key);
+    if (c) return c;
+    c = document.createElement('canvas');
+    c.width  = w + DIFF_PAD * 2;
+    c.height = h + DIFF_PAD * 2;
+    const g = c.getContext('2d');
+    g.translate(DIFF_PAD, DIFF_PAD);
+
+    g.font         = 'bold 11px monospace';
+    g.textAlign    = 'center';
+    g.textBaseline = 'middle';
+
+    g.fillStyle   = active ? COLORS[i] + '28' : 'rgba(0,0,0,0.4)';
+    g.strokeStyle = active ? COLORS[i]        : 'rgba(255,255,255,0.15)';
+    g.lineWidth   = active ? 2 : 1;
+    g.shadowBlur  = active ? 16 : 0;
+    g.shadowColor = COLORS[i];
+    roundRect(g, 0, 0, w, h, 9);
+    g.fill();
+    g.stroke();
+
+    g.shadowBlur = active ? 12 : 0;
+    g.fillStyle  = active ? COLORS[i] : 'rgba(255,255,255,0.4)';
+    g.fillText(LABELS[i], w / 2, h / 2);
+
+    diffCache.set(key, c);
+    return c;
+  }
+
+  // The static caption above the row.
+  let captionLayer = null;
+
   function drawDifficultySelector(ctx) {
-    const cx     = C.CANVAS_W / 2;
-    const diffs  = ['easy', 'normal', 'hard'];
-    const labels = ['EASY', 'NORMAL', 'HARD'];
-    const colors = ['#69ff47', '#00e5ff', '#ff1744'];
+    const cx = C.CANVAS_W / 2;
 
-    // Label above
-    ctx.save();
-    ctx.font          = 'bold 10px monospace';
-    ctx.textAlign     = 'center';
-    ctx.fillStyle     = 'rgba(255,255,255,0.35)';
-    ctx.letterSpacing = '2px';
-    ctx.fillText('SELECT DIFFICULTY', cx, 508);
-    ctx.restore();
+    if (!captionLayer) {
+      captionLayer = document.createElement('canvas');
+      captionLayer.width = C.CANVAS_W;
+      captionLayer.height = 24;
+      const g = captionLayer.getContext('2d');
+      g.font          = 'bold 10px monospace';
+      g.textAlign     = 'center';
+      g.textBaseline  = 'middle';
+      g.fillStyle     = 'rgba(255,255,255,0.35)';
+      g.letterSpacing = '2px';
+      g.fillText('SELECT DIFFICULTY', cx, 12);
+    }
+    ctx.drawImage(captionLayer, 0, 508 - 12);
 
-    ctx.save();
-    ctx.font          = 'bold 11px monospace';
-    ctx.textAlign     = 'center';
-    ctx.textBaseline  = 'middle';
-
-    diffs.forEach((d, i) => {
+    DIFFS.forEach((d, i) => {
       const { x: bx, y: by, w, h } = diffBtnBounds[d];
-      const active = selectedDifficulty === d;
-
-      // Background
-      ctx.fillStyle   = active ? colors[i] + '28' : 'rgba(0,0,0,0.4)';
-      ctx.strokeStyle = active ? colors[i]        : 'rgba(255,255,255,0.15)';
-      ctx.lineWidth   = active ? 2 : 1;
-      ctx.shadowBlur  = active ? 16 : 0;
-      ctx.shadowColor = colors[i];
-      roundRect(ctx, bx, by, w, h, 9);
-      ctx.fill();
-      ctx.stroke();
-
-      // Label
-      ctx.shadowBlur  = active ? 12 : 0;
-      ctx.fillStyle   = active ? colors[i] : 'rgba(255,255,255,0.4)';
-      ctx.fillText(labels[i], bx + w / 2, by + h / 2);
+      const c = diffSprite(i, w, h, selectedDifficulty === d);
+      ctx.drawImage(c, bx - DIFF_PAD, by - DIFF_PAD);
     });
+  }
 
-    ctx.restore();
+  // The button face never changes; only its glow breathes. Bake the face once with
+  // its glow, then modulate the pulse with an additive blob behind it.
+  let playLayer = null;
+  const PLAY_PAD = 46;
+
+  function bakePlayButton() {
+    if (playLayer) return;
+    const { w: bw, h: bh } = playBtnBounds;
+    playLayer = document.createElement('canvas');
+    playLayer.width  = bw + PLAY_PAD * 2;
+    playLayer.height = bh + PLAY_PAD * 2;
+    const g = playLayer.getContext('2d');
+    g.translate(PLAY_PAD, PLAY_PAD);
+
+    g.shadowBlur  = 36;
+    g.shadowColor = '#00e5ff';
+
+    const grad = g.createLinearGradient(0, 0, 0, bh);
+    grad.addColorStop(0, '#00c8e0');
+    grad.addColorStop(1, '#0088a8');
+    g.fillStyle = grad;
+    roundRect(g, 0, 0, bw, bh, 16);
+    g.fill();
+    g.shadowBlur = 0;
+
+    // Highlight strip at top
+    g.globalAlpha = 0.25;
+    g.fillStyle   = '#ffffff';
+    roundRect(g, 3, 3, bw - 6, bh * 0.42, 14);
+    g.fill();
+    g.globalAlpha = 1;
+
+    // Border
+    g.strokeStyle = 'rgba(255,255,255,0.38)';
+    g.lineWidth   = 1.5;
+    roundRect(g, 0, 0, bw, bh, 16);
+    g.stroke();
+
+    // Label
+    g.fillStyle    = '#ffffff';
+    g.font         = 'bold 23px monospace';
+    g.textAlign    = 'center';
+    g.textBaseline = 'middle';
+    g.shadowBlur   = 12;
+    g.shadowColor  = '#ffffff';
+    g.fillText('▶  PLAY', bw / 2, bh / 2 + 1);
   }
 
   function drawPlayButton(ctx) {
-    const cx = C.CANVAS_W / 2;
     const { x: bx, y: by, w: bw, h: bh } = playBtnBounds;
-
     const pulse = 0.82 + 0.18 * Math.sin(animFrame * 2.4);
+    bakePlayButton();
 
-    ctx.save();
+    // The breathing glow, additively behind the baked face.
+    ctx.globalCompositeOperation = 'lighter';
+    Glow.draw(ctx, '#00e5ff', bx + bw / 2, by + bh / 2, bw * 0.52, 0.16 * pulse);
+    ctx.globalCompositeOperation = 'source-over';
 
-    // Outer glow
-    ctx.shadowBlur  = 36 * pulse;
-    ctx.shadowColor = '#00e5ff';
-
-    // Button fill gradient
-    const grad = ctx.createLinearGradient(bx, by, bx, by + bh);
-    grad.addColorStop(0, '#00c8e0');
-    grad.addColorStop(1, '#0088a8');
-    ctx.fillStyle = grad;
-    roundRect(ctx, bx, by, bw, bh, 16);
-    ctx.fill();
-
-    // Highlight strip at top
-    ctx.globalAlpha = 0.25;
-    ctx.fillStyle   = '#ffffff';
-    roundRect(ctx, bx + 3, by + 3, bw - 6, bh * 0.42, 14);
-    ctx.fill();
     ctx.globalAlpha = 1;
-
-    // Border
-    ctx.strokeStyle = 'rgba(255,255,255,0.38)';
-    ctx.lineWidth   = 1.5;
-    ctx.shadowBlur  = 0;
-    roundRect(ctx, bx, by, bw, bh, 16);
-    ctx.stroke();
-
-    // Label
-    ctx.fillStyle   = '#ffffff';
-    ctx.font        = 'bold 23px monospace';
-    ctx.textAlign   = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.shadowBlur  = 12 * pulse;
-    ctx.shadowColor = '#ffffff';
-    ctx.fillText('▶  PLAY', cx, by + bh / 2 + 1);
-
-    ctx.restore();
+    ctx.drawImage(playLayer, bx - PLAY_PAD, by - PLAY_PAD);
   }
+
+  const bestCache = { key: null, canvas: null };
 
   function drawBestScore(ctx) {
     if (bestScore <= 0) return;
     const cx = C.CANVAS_W / 2;
-    ctx.save();
-    ctx.font          = 'bold 13px monospace';
-    ctx.textAlign     = 'center';
-    ctx.textBaseline  = 'alphabetic';
-    ctx.fillStyle     = 'rgba(255,255,255,0.38)';
-    ctx.shadowBlur    = 6;
-    ctx.shadowColor   = '#00e5ff';
-    ctx.fillText(`BEST  ${bestScore}`, cx, 655);
-    ctx.restore();
+    const key = String(bestScore);
+
+    if (bestCache.key !== key) {
+      if (!bestCache.canvas) bestCache.canvas = document.createElement('canvas');
+      const c = bestCache.canvas;
+      if (c.width !== C.CANVAS_W || c.height !== 30) { c.width = C.CANVAS_W; c.height = 30; }
+      const g = c.getContext('2d');
+      g.clearRect(0, 0, c.width, c.height);
+      g.font          = 'bold 13px monospace';
+      g.textAlign     = 'center';
+      g.textBaseline  = 'middle';
+      g.fillStyle     = 'rgba(255,255,255,0.38)';
+      g.shadowBlur    = 6;
+      g.shadowColor   = '#00e5ff';
+      g.fillText(`BEST  ${bestScore}`, cx, 15);
+      bestCache.key = key;
+    }
+    ctx.drawImage(bestCache.canvas, 0, 655 - 19);
   }
 
   function drawHint(ctx) {
@@ -303,9 +375,16 @@ const Title = (() => {
     drawPlayButton(ctx);
     drawBestScore(ctx);
     drawHint(ctx);
+    // Xsolla wordmark is title-screen only, per ../branding.md.
+    Brand.drawLogo(ctx, C.BRAND_LOGO_X, C.BRAND_LOGO_Y, C.BRAND_LOGO_W);
+    // Last, so the column sits above the rest of the screen.
+    HUD.drawButtons(ctx, HUD.KINDS_TITLE);
   }
 
   function handleClick(cx, cy) {
+    const btn = HUD.hitTest(cx, cy, HUD.KINDS_TITLE);
+    if (btn) return btn;          // 'sound' | 'fullscreen', handled by Game
+
     const diffs = ['easy', 'normal', 'hard'];
     for (const d of diffs) {
       const b = diffBtnBounds[d];
