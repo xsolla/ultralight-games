@@ -71,9 +71,10 @@ there when it arrives rather than inventing a new home for it.
   js/ambiance.js                        Stars namespace: parallax starfield; later nebula
   js/render.js                          all canvas drawing — world, HUD, cards — and HUD layout
 ○ js/menu.js                            title, ship select, difficulty, records screens
-○ js/audio.js                           Sound namespace
-○ js/scores.js                          localStorage high-score table
+  js/audio.js                           Sound namespace: the run's background music
+  js/scores.js                          localStorage high-score table
   js/game.js                            the Game object: state, screens, input, main loop
+  assets/bgm/bgm_ship1..3.mp3           one looping track per hull, named in SHIPS
   assets/sprites/interceptor_atlas.png  the three player ships, 6 frames each
   assets/sprites/projectiles_atlas.png  the five weapon particles, 5 frames each
   assets/sprites/alien_noshoot_atlas.png  the five non-shooting enemies, 5 frames each
@@ -728,14 +729,34 @@ Not yet settled — ask rather than assuming:
   (parallel column), Fiery Fury (15° staggered gatling sweep), Lightning Gun (90° fan).
   Level is the particle count; level 1 is always one shot dead ahead. Expanding means a
   new row plus, if the shape is genuinely new, a `pattern` case in `weapons.js`.
-- **Audio.** Still unknown whether this game wants audio at all, and no audio assets
-  exist — but the *contract* now does: `Game.soundState` is live, the HUD's sound
-  button walks the `SOUND_CYCLE` in `constants.js` (`'on'` → `'musicoff'` → `'off'`),
-  and the icon already shows which state it is in. So `audio.js`, when it lands, is a
-  reader of existing state rather than a change to the HUD. The reference game's
-  module is the template — preloaded `HTMLAudioElement` pools for SFX, a streamed
-  looping BGM track, every entry point guarded so a missing file yields silence rather
-  than a crash.
+- **Audio.** ~~Still unknown whether this game wants audio at all.~~ Half settled:
+  **music has landed, SFX have not.** `audio.js` holds the `Sound` namespace and reads
+  `Game.soundState` through `applyState` exactly as the contract promised, so the HUD
+  did not move; SFX arrive as preloaded `HTMLAudioElement` pools in the same module,
+  the way the reference game's does, and there are no sfx assets yet.
+
+  **The music belongs to the HULL, and playback belongs to the RUN.** Each row of
+  `SHIPS` names its own looping track, so a fourth hull arrives with its music
+  attached. `Sound.inRun` is true only between `startRun()` and `toMenu()`, which is
+  what keeps the title screen silent — not even the sound button can start a track
+  there. The game-over card counts as part of the run it reports, so the music plays
+  under it and lets go at the title.
+
+  Three durations, and only the first is a plain fade: **leaving for the title fades
+  out over `AUDIO.FADE_MS`** (3 s), **a mid-run hull swap crossfades over
+  `AUDIO.CROSSFADE_MS`** (2 s), and **a run opening out of silence starts at once** —
+  the fade is for leaving, and a run whose first seconds were a ramp would be missing
+  them. A retry from the card is the fourth case and needs no rule of its own: a track
+  that is already sounding is crossed into, never cut.
+
+  Crossfades are **equal-power** (`from·cos + to·sin`), because two linear ramps
+  crossing at half volume sum to ~3 dB below either track alone — a dip in the middle
+  of every swap, which is the one thing a crossfade exists to hide.
+
+  `HTMLAudioElement` rather than Web Audio, for §2's reason. The cost is iOS Safari,
+  which ignores the `volume` property: every fade there degrades to a cut and nothing
+  else changes. Fixing that means routing through Web Audio, which is what §2 rules
+  out — weigh it against `file://` before reaching for it.
 - **Asteroid art.** No atlas yet; placeholders until then (§6). Enemy and projectile
   art has landed, and explosions are ~~open~~ settled — they reuse the enemy atlas (§6).
   ~~`alien_shoot_atlas.png` is in the repo but unused.~~ Settled: all five armed types

@@ -40,13 +40,22 @@ const FLIGHT_FRAMES = {
 // clusters — which is exactly the "blue/orange, grey/red, white/green" the
 // atlas notes in CLAUDE.md §6 describe. Format is "r, g, b" so alpha composes
 // at draw time, the same convention COLORS.star uses.
+//
+// `bgm` is the hull's background music, played for as long as it is flown and
+// crossfaded when a ship bonus moves the player off it (audio.js). It sits on
+// the row rather than in an array in audio.js so that a fourth hull arrives
+// with its music attached and the two cannot fall out of step — the same reason
+// the wreck colours are here. A row with no `bgm` simply flies in silence.
 const SHIPS = [
   { name: 'Interceptor', base: 2, speed: 300, dispW: 42,
-    color: '65, 118, 162',  spark: '227, 141, 74' },   // steel blue + orange
+    color: '65, 118, 162',  spark: '227, 141, 74',     // steel blue + orange
+    bgm: 'assets/bgm/bgm_ship1.mp3' },
   { name: 'Warhammer',   base: 3, speed: 250, dispW: 46,
-    color: '197, 92, 51',   spark: '252, 225, 110' },  // rust red + brass
+    color: '197, 92, 51',   spark: '252, 225, 110',    // rust red + brass
+    bgm: 'assets/bgm/bgm_ship2.mp3' },
   { name: 'Verdant',     base: 4, speed: 215, dispW: 46,
-    color: '97, 179, 130',  spark: '87, 150, 160' },   // green + pale teal
+    color: '97, 179, 130',  spark: '87, 150, 160',     // green + pale teal
+    bgm: 'assets/bgm/bgm_ship3.mp3' },
 ];
 
 // ---- Particle colours ------------------------------------------------------

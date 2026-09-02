@@ -94,6 +94,11 @@ const BONUS_EFFECTS = {
     const same = arg === game.player.ship;
     setShip(game.player, arg);
     if (same) healPlayer(game.player, SHIP_MATCH_HEAL);
+    // The music belongs to the hull, so it changes with it — a crossfade, since
+    // this happens mid-flight and a cut would land like a mistake. Told rather
+    // than polled, and told AFTER the swap so it reads the hull that is now
+    // being flown; a same-hull catch is a no-op inside Sound.
+    Sound.setShip(game.player.ship);
   },
 
   turbo:  (game) => startTurbo(game.player),
@@ -252,6 +257,10 @@ const Game = {
     this.resetRun(START_SHIP);
     this.screen = 'playing';
     this.menuHover = null;
+    // Music is bound to the RUN, and this is one of the two places that bind
+    // it. Started from a press, never from init(), so the browser's autoplay
+    // gate is already open by the time the track is asked to play.
+    Sound.startMusic(this.player.ship);
   },
 
   // Back to the title. Hover state is cleared on the way out because it is the
@@ -263,6 +272,10 @@ const Game = {
     this.menuHover = null;
     this.hudHover = null;
     this.hudCapture = false;
+    // ...and the other end of the binding. Here rather than at the wreck: the
+    // game-over card sits over the run it reports and is still part of it, so
+    // the music carries through and the title screen is where it lets go.
+    Sound.fadeOutMusic();
   },
 
   // Open the records card over whatever is on screen now. `from` is 'menu' when
@@ -519,8 +532,12 @@ const Game = {
   // One press. Kept here rather than in render.js because every one of these is
   // a state transition, and render.js does not mutate state.
   pressHudButton(id) {
-    if (id === 'sound') this.soundState = SOUND_CYCLE[this.soundState];
-    else if (id === 'exit') this.endRun();
+    if (id === 'sound') {
+      this.soundState = SOUND_CYCLE[this.soundState];
+      // Game.soundState stays the single source of truth (constants.js);
+      // audio.js is handed the new value rather than reaching for it.
+      Sound.applyState(this.soundState);
+    } else if (id === 'exit') this.endRun();
     else this.toggleFullscreen();
   },
 
