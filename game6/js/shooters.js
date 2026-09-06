@@ -119,6 +119,12 @@ function updateGun(e, type, dt, player, out, diff) {
 // volleys, which is what keeps a fan a fan on both sides of the fight.
 function fireVolley(e, type, g, player, out, diff) {
   const wp = ENEMY_WEAPONS[g.weapon];
+  // One report per volley, for the reason the player's gun sounds where it
+  // does. All five armed types share it — the assets are one `enemy_fire` set
+  // rather than one sound per gun — and AUDIO.SFX throttles it, because a
+  // Reaver chain is eight hulls firing on the same clock and a boss wave has
+  // every type on the field at once.
+  Sound.play('enemyFire');
 
   // 'split' rolls per volley rather than per ship, so one crossing wing mixes
   // shots down its own track with shots at the player instead of splitting

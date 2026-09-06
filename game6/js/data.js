@@ -139,20 +139,29 @@ const BULLET_FRAMES = [0, 1, 2, 3, 4, 3, 2, 1];
 // which weapon is inside, so two weapons sharing an initial would make one of
 // the two unreadable. The five names happen to start S/P/M/F/L; a sixth weapon
 // beginning with one of those needs a letter that is not its initial.
+//
+// `sfx` is the report the gun makes, named as a key into AUDIO.SFX rather than
+// as a path — the same way a `path` field here names a PATHS entry instead of
+// inlining the function. It sits on the ROW for the reason SHIPS.bgm does: a
+// sixth weapon then arrives with its sound attached and the two cannot fall out
+// of step. The file is the one thing audio.js owns, along with that sound's
+// pool and throttle, because the mix is only readable in one column.
 const WEAPONS = [
   // Narrow, fast, cheap. The baseline the others are read against.
-  { key: 'spark', name: 'Spark Gun', row: 0, letter: 'S',
+  { key: 'spark', name: 'Spark Gun', row: 0, letter: 'S', sfx: 'weaponSpark',
     pattern: 'fan', spreadDeg: 10,
     speed: 520, interval: 150, dispW: 13, damage: 1 },
 
   // Wider fan and heavier hits, but a slower cadence than the Spark Gun.
-  { key: 'plasma', name: 'Plasma Gun', row: 1, letter: 'P',
+  { key: 'plasma', name: 'Plasma Gun', row: 1, letter: 'P', sfx: 'weaponPlasma',
     pattern: 'fan', spreadDeg: 25,
     speed: 430, interval: 210, dispW: 16, damage: 2 },
 
   // No spread at all — a widening column of parallel shots. Trades area denial
   // for concentrated single-target damage, so it stays distinct from the fans.
-  { key: 'mystic', name: 'Mystic Dagger', row: 2, letter: 'M',
+  // Its sound is named for the weapon rather than its key: the asset is
+  // `weapon_dagger`, which is the second half of "Mystic Dagger".
+  { key: 'mystic', name: 'Mystic Dagger', row: 2, letter: 'M', sfx: 'weaponDagger',
     pattern: 'parallel', spacing: 6,
     speed: 600, interval: 180, dispW: 12, damage: 2 },
 
@@ -160,7 +169,7 @@ const WEAPONS = [
   // volleys — that continuity is what reads as a driven gatling rather than a
   // fan dealt out one card at a time. 0.11 moves each shot 3.3 degrees
   // (step x 2 x spread), so a full side-to-side traverse takes ~9 shots.
-  { key: 'fury', name: 'Fiery Fury', row: 3, letter: 'F',
+  { key: 'fury', name: 'Fiery Fury', row: 3, letter: 'F', sfx: 'weaponFury',
     pattern: 'sweep', spreadDeg: 15, stagger: true, sweepStep: 0.11,
     speed: 470, interval: 200, dispW: 15, damage: 1 },
 
@@ -169,7 +178,7 @@ const WEAPONS = [
   // so the arc is dealt one bolt at a time from one edge to the other rather
   // than appearing as a single 90-degree wall. The angles are still the fixed
   // even fan — the barrel does not move, unlike Fiery Fury's.
-  { key: 'lightning', name: 'Lightning Gun', row: 4, letter: 'L',
+  { key: 'lightning', name: 'Lightning Gun', row: 4, letter: 'L', sfx: 'weaponLightning',
     pattern: 'fan', spreadDeg: 90, stagger: true,
     speed: 380, interval: 260, dispW: 14, damage: 1 },
 ];

@@ -75,6 +75,9 @@ const BONUS_EFFECTS = {
     if (game.player.invulnMs > 0) return;
     damagePlayer(game.player);
     game.player.invulnMs = PLAYER_INVULN_MS;
+    // No sound argument, so it takes onPlayerHit's default: a trap sounds
+    // exactly like being shot, because that is what it is. It is also the one
+    // bonus that does NOT sound like a catch — see applyBonus.
     game.onPlayerHit(row.color, row.spark);
   },
 
@@ -99,10 +102,25 @@ const BONUS_EFFECTS = {
     // than polled, and told AFTER the swap so it reads the hull that is now
     // being flown; a same-hull catch is a no-op inside Sound.
     Sound.setShip(game.player.ship);
+    // Announced even on a matching hull, for the same reason the flash is: the
+    // catch has to produce something, and this is the sound of the swap the
+    // player just watched. It layers over the catch sound rather than replacing
+    // it — the pop is the bubble, this is what was in it.
+    Sound.play('shipChanged');
   },
 
-  turbo:  (game) => startTurbo(game.player),
-  wing:   (game) => spawnWingmen(game.wingmen, game.player),
+  turbo: (game) => {
+    startTurbo(game.player);
+    // Re-triggering refreshes the burst rather than stacking it (player.js), so
+    // this re-announces rather than doubling. The matching 'turboOff' is fired
+    // from the update loop, where the burst actually runs out.
+    Sound.play('turboOn');
+  },
+
+  wing: (game) => {
+    spawnWingmen(game.wingmen, game.player);
+    Sound.play('wingmenAppear');
+  },
 };
 
 const Game = {
@@ -143,6 +161,13 @@ const Game = {
   // index rather than as "points since the last one" so a single gain that
   // vaults a milestone still fires it exactly once.
   bossMilestone: 0,
+  // Last frame's weapon level, so the counter crossing a layer boundary can be
+  // heard. Watched here rather than sounded from damagePlayer/healPlayer
+  // because the level is DERIVED from `hits` (CLAUDE.md §7) — a ship swap moves
+  // `hits` without moving the level and must stay silent, and a heal at full
+  // armour moves it without any damage having happened. One watcher over the
+  // derived value gets all of those right; a call per writer gets none of them.
+  weaponLvl: 1,
   // The run's result, frozen the instant the run ended. `newRank` is the row it
   // took in the table, or -1 for a run that did not make it — which is what
   // decides whether there is a card to show at all.
@@ -177,6 +202,11 @@ const Game = {
   // it is set the ship does not follow the pointer at all, so dragging off a
   // button cannot fling the ship into the corner behind it.
   hudCapture: false,
+  // The button the hover sound has already been played for. Kept apart from
+  // hudHover/menuHover because those are redrawn from the pointer every frame
+  // and this has to remember an EDGE — without it a cursor resting still on a
+  // button would retrigger on every pointermove event it happens to emit.
+  hoverSfx: null,
 
   // Input state, read once per frame by updatePlayer().
   pointer: { x: CANVAS_W / 2, y: CANVAS_H / 2, active: false },
@@ -209,6 +239,10 @@ const Game = {
     Rays.init();
     Bokeh.init();
     Scores.init();
+    // Before the first frame, and before any screen can be pressed: the sfx
+    // pools have to be buffered by the time the first button is, or the click
+    // arrives after the thing it is reporting.
+    Sound.initSfx();
     // A run is built up front even though the title screen is what opens, so
     // every reader of Game.player has something to read before the first START.
     this.resetRun(START_SHIP);
@@ -239,6 +273,10 @@ const Game = {
     this.scoreMs = 0;
     this.scorePopMs = 0;
     this.bossMilestone = 0;
+    // Seeded from the fresh hull rather than from 1, so a future ship-select
+    // screen starting a run on some other `base` cannot make the first frame
+    // look like a level change.
+    this.weaponLvl = weaponLevel(this.player);
     this.runOver = false;
     this.finalScore = 0;
     this.newRank = -1;
@@ -358,10 +396,12 @@ const Game = {
       if (this.screen === 'menu' || this.screen === 'records') {
         this.menuHover = over ? null : this.screenButtonAt(p.x, p.y);
         this.canvas.style.cursor = (over || this.menuHover) ? 'pointer' : 'default';
+        this.noteHover(over || this.menuHover);
         return;
       }
 
       this.canvas.style.cursor = over ? 'pointer' : 'default';
+      this.noteHover(over);
       // The top corners belong to the HUD. A bare cursor resting on a button
       // must not drag the ship up there to meet it, and a drag that STARTED on
       // a button must not steer at all — both are the same rule, and both are
@@ -378,6 +418,7 @@ const Game = {
       this.hudHover = null;
       this.menuHover = null;
       this.hudCapture = false;
+      this.hoverSfx = null;
     });
 
     this.canvas.addEventListener('pointerdown', (e) => {
@@ -442,14 +483,20 @@ const Game = {
       // The title screen's own keys, and an early return so none of the
       // run-only keys below can fire at a ship that is not flying yet.
       if (this.screen === 'menu') {
+        // Both go through pressMenuButton rather than acting directly, so the
+        // keyboard and the pointer reach the same code — which is what gives
+        // the keys the click sound without a second call site to keep in step.
         if (k === 'enter' || k === ' ') {
-          this.startRun();
+          this.pressMenuButton('start');
           e.preventDefault();
         }
         // 1/2/3 pick a difficulty. Kept where the mid-run copy of it was not:
         // this one only reaches a control the player can already see and press,
         // and it changes nothing that is not shown on screen the instant after.
-        if (k >= '1' && k <= '3') this.diffIdx = +k - 1;
+        if (k >= '1' && k <= '3') {
+          const r = menuButtonRects().find((b) => b.kind === 'diff' && b.i === +k - 1);
+          if (r) this.pressMenuButton(r.id);
+        }
         return;
       }
 
@@ -478,6 +525,7 @@ const Game = {
       this.hudCapture = false;
       this.hudHover = null;
       this.menuHover = null;
+      this.hoverSfx = null;
     });
 
     // The browser will not let a page play audio until the user has touched it,
@@ -510,28 +558,48 @@ const Game = {
     const milestone = Math.floor(this.score / BOSS_SCORE_STEP);
     if (milestone > this.bossMilestone) {
       this.bossMilestone = milestone;
-      queueBossWaves(this.spawn, bossWavesFor(milestone));
+      const waves = bossWavesFor(milestone);
+      queueBossWaves(this.spawn, waves);
+      // Sounded at the QUEUE, not at the arrival, which is what makes it a
+      // warning: BOSS_LEAD_MS is 700ms and the cue runs seven seconds, so it
+      // opens on the point that summoned the wave and is still going when the
+      // wave lands. A double gets one `large` rather than two `small` — the
+      // second wave arrives at BOSS_REPEAT_MS, well inside the first cue.
+      Sound.play(waves >= BOSS_DOUBLE ? 'bossLarge' : 'bossSmall');
     }
   },
 
   // ---- Bonuses ------------------------------------------------------------
   applyBonus(b) {
     const row = BONUSES[b.t];
+    // The pop of the bubble, before whatever was inside it announces itself.
+    // Every kind but the trap: `harm` is not a prize and must not open with the
+    // sound of one, or the tint would stop being the only thing separating the
+    // two at a distance (CLAUDE.md §7). It sounds like the hit it is instead.
+    if (row.kind !== 'harm') Sound.play('bonusTaken');
     BONUS_EFFECTS[row.kind](this, b.arg, row);
   },
 
   // ---- Feedback -----------------------------------------------------------
-  // Every way the player can be hurt funnels through here, so the flash and the
-  // shake can never drift apart or be forgotten by a new damage source. Colours
-  // are the SOURCE's; pass null when the source has none and explodeImpact
-  // picks one (CLAUDE.md §7).
+  // Every way the player can be hurt funnels through here, so the flash, the
+  // shake and the sound can never drift apart or be forgotten by a new damage
+  // source. Colours are the SOURCE's; pass null when the source has none and
+  // explodeImpact picks one (CLAUDE.md §7).
+  //
+  // `sfx` is the same idea in the other medium: the sound says what got you,
+  // exactly as the colour does. It DEFAULTS rather than being required, because
+  // §7 fixes every damage source at one hit and 'playerHit' is what a hit
+  // sounds like — so a new source arrives audible and only has to name a sound
+  // if it has one of its own. The two that do are the contact hazards, which
+  // are the pair a player has to tell apart by feel while looking elsewhere.
   //
   // Deliberately NOT inside damagePlayer: that is a pure function over the
   // counter in player.js, and spawning effects from it would put presentation
   // inside the armour model.
-  onPlayerHit(color, spark) {
+  onPlayerHit(color, spark, sfx) {
     explodeImpact(this.explosions, this.player.x, this.player.y, color, spark);
     this.shake(SHAKE_HIT_MS, SHAKE_HIT_MAG);
+    Sound.play(sfx || 'playerHit');
   },
 
   // Start a shake, unless a bigger one is already running. Bigger WINS OUTRIGHT
@@ -549,6 +617,11 @@ const Game = {
   // One press. Kept here rather than in render.js because every one of these is
   // a state transition, and render.js does not mutate state.
   pressHudButton(id) {
+    // FIRST, so a press that walks the sound button to 'off' still clicks on
+    // the way out: the state it is heard under is the one the player pressed
+    // from. Coming back the other way, 'off' -> 'on' is silent for the same
+    // reason, which is the correct half of the same rule.
+    Sound.play('uiClick');
     if (id === 'sound') {
       this.soundState = SOUND_CYCLE[this.soundState];
       // Game.soundState stays the single source of truth (constants.js);
@@ -589,6 +662,7 @@ const Game = {
   // reason pressHudButton is here rather than in render.js: every one of these
   // is a state transition, and neither presentation module mutates state.
   pressMenuButton(id) {
+    Sound.play('uiClick');
     if (id === 'start') {
       this.startRun();
       return;
@@ -611,6 +685,7 @@ const Game = {
   // 'retry' starts another run; 'title' and 'ok' are the same destination
   // wearing the label its context calls for.
   pressRecordsButton(id) {
+    Sound.play('uiClick');
     if (id === 'retry') this.startRun();
     else this.toMenu();
   },
@@ -636,6 +711,20 @@ const Game = {
     // Rejects when an embedding page withholds allow="fullscreen" (§5), so the
     // button is simply inert there rather than throwing.
     if (req) { const r = req.call(el); if (r && r.catch) r.catch(() => {}); }
+  },
+
+  // The pointer moved onto (or off) a button. `id` is whatever is under it now,
+  // from either layout — one tracker serves both because a pointer over a HUD
+  // button is over no menu button by construction (see menuHover), so moving
+  // between the two layouts still sounds exactly once.
+  //
+  // MOUSE ONLY. A hover is a mouse idea: on touch there is no cursor to arrive
+  // anywhere, and the pointermove a tap emits on its way to pointerdown would
+  // put this sound in front of every click.
+  noteHover(id) {
+    if (id === this.hoverSfx) return;
+    this.hoverSfx = id;
+    if (id && this.lastInputKind === 'mouse') Sound.play('uiHover');
   },
 
   // A pointer event's type decides whether the player needs a fire button.
@@ -708,10 +797,18 @@ const Game = {
     // A wrecked ship neither flies nor fires, but the run carries on beneath
     // it: enemies keep coming and the stars keep scrolling while it burns.
     if (!this.player.dead) {
+      // Read before the burst is ticked down, so its expiry can be heard. The
+      // edge is watched HERE rather than announced from player.js because
+      // running out is not something anything calls — it is a countdown
+      // reaching zero, and only the frame that saw it cross can say so. Inside
+      // this branch on purpose: a wrecked ship's turbo is dropped by killPlayer
+      // along with its engine, and that is the explosion's event, not this one.
+      const turbo = this.player.turboMs > 0;
       // Move the ship before firing, so a volley leaves from where the hull
       // ended up this frame rather than trailing a frame behind it.
       updatePlayer(this.player, dt, this.readInput());
       updateWeapon(this.player, dt, this.isFiring(), this.bullets);
+      if (turbo && this.player.turboMs === 0) Sound.play('turboOff');
     }
     // The wing flies formation on wherever the ship just went, and shoots on the
     // player's own trigger — so it follows the same move-then-fire ordering.
@@ -772,7 +869,11 @@ const Game = {
       // together in the same hue and read as one collision rather than two
       // unrelated events.
       const t = ENEMY_TYPES[rammed.t];
-      this.onPlayerHit(t.color, t.spark);
+      // Its own sound, not the general hit: hull on hull is the one damage the
+      // player caused by flying somewhere rather than by failing to dodge, and
+      // it is the one that also killed something. The enemy's own explosion is
+      // already sounding underneath it.
+      this.onPlayerHit(t.color, t.spark, 'collisionEnemy');
     }
 
     // Rocks resolve after the enemies, so a frame that could go either way
@@ -781,7 +882,11 @@ const Game = {
     const struck = resolveAsteroidHits(this.player, this.asteroids);
     if (struck) {
       const t = ASTEROID_TYPES[struck.t];
-      this.onPlayerHit(t.color, t.spark);
+      // The third of §7's damage sources and the only one that also takes the
+      // controls away for a second (PLAYER_STUN_MS). It needs to be audibly the
+      // rock rather than a generic hit, because what follows it — a shove and a
+      // dead pointer — is unlike anything else in the game.
+      this.onPlayerHit(t.color, t.spark, 'collisionAsteroid');
     }
 
     // Bonuses drift and are collected after all damage has resolved, so a heal
@@ -792,6 +897,11 @@ const Game = {
     }
 
     this.updateDeath(dt);
+    // After updateDeath, which is the only thing that sets `dead` — so the
+    // frame that wrecks the ship is already flagged by the time the level is
+    // read, and the drop from level 1 to nothing is heard as the explosion it
+    // is rather than as one more layer going.
+    this.updateWeaponLevel();
     updateExplosions(this.explosions, dt);
 
     // One point per second, but only while there is someone alive to earn it —
@@ -812,6 +922,26 @@ const Game = {
     const target = this.player.turboMs > 0 ? PLAYER_TURBO_MULT : 1;
     this.scrollMult += (target - this.scrollMult) * (1 - Math.exp(-SCROLL_EASE * dt / 1000));
     Stars.update(dt, this.scrollMult);
+  },
+
+  // Announce the armour counter crossing a layer boundary — the one event in
+  // §7's model that has no call of its own, because the level is derived from
+  // `hits` and every writer of `hits` moves it without meaning to.
+  //
+  // Watched over the derived value once a frame, which is what makes all four
+  // cases come out right without a single `if` about which of them it was: a
+  // hit that empties a layer falls, a heal at full armour rises, a heal that
+  // does not fill a layer is silent, and a SHIP SWAP is silent because §7 has
+  // it carry the level across a different `base` on purpose.
+  updateWeaponLevel() {
+    const lvl = this.player.dead ? 0 : weaponLevel(this.player);
+    // A wreck is recorded but never sounded, in either direction: the drop to
+    // nothing belongs to the explosion, and a run restarting on a fresh hull
+    // re-seeds this in resetRun rather than climbing back up through it.
+    if (!this.player.dead && lvl !== this.weaponLvl) {
+      Sound.play(lvl > this.weaponLvl ? 'levelUp' : 'levelDown');
+    }
+    this.weaponLvl = lvl;
   },
 
   // Out of armour is out of the run (CLAUDE.md §7). Checked here once a frame

@@ -71,11 +71,12 @@ there when it arrives rather than inventing a new home for it.
   js/ambiance.js                        Stars namespace: parallax starfield; later nebula
   js/render.js                          all canvas drawing — world, HUD, cards — and HUD layout
 ○ js/menu.js                            title, ship select, difficulty, records screens
-  js/audio.js                           Sound namespace: background music
+  js/audio.js                           Sound namespace: background music and the SFX pools
   js/scores.js                          localStorage high-score table
   js/game.js                            the Game object: state, screens, input, main loop
   assets/bgm/bgm_ship1..3.mp3           one looping track per hull, named in SHIPS
   assets/bgm/bgm_title.mp3              the title screen's, named in AUDIO.TITLE_SRC
+  assets/sfx/*.mp3                      29 one-shots, all named in AUDIO.SFX (§10)
   assets/sprites/interceptor_atlas.png  the three player ships, 6 frames each
   assets/sprites/projectiles_atlas.png  the five weapon particles, 5 frames each
   assets/sprites/alien_noshoot_atlas.png  the five non-shooting enemies, 5 frames each
@@ -730,11 +731,62 @@ Not yet settled — ask rather than assuming:
   (parallel column), Fiery Fury (15° staggered gatling sweep), Lightning Gun (90° fan).
   Level is the particle count; level 1 is always one shot dead ahead. Expanding means a
   new row plus, if the shape is genuinely new, a `pattern` case in `weapons.js`.
-- **Audio.** ~~Still unknown whether this game wants audio at all.~~ Half settled:
-  **music has landed, SFX have not.** `audio.js` holds the `Sound` namespace and reads
-  `Game.soundState` through `applyState` exactly as the contract promised, so the HUD
-  did not move; SFX arrive as preloaded `HTMLAudioElement` pools in the same module,
-  the way the reference game's does, and there are no sfx assets yet.
+- ~~**Audio.**~~ Settled: **music and SFX have both landed.** `audio.js` holds the
+  `Sound` namespace and reads `Game.soundState` through `applyState` exactly as the
+  contract promised, so the HUD did not move.
+
+  **AN SFX IS AN EVENT, NOT A FILE.** `AUDIO.SFX` is one row per event — `src` is a
+  single path or the list a `*_var*` set rolls between — and callers say
+  `Sound.play('enemyExplosion')`, never a path. So a variant set that grows a fourth
+  file, or a sound that wants a different level, is a change in that table and
+  nowhere else. `WEAPONS.sfx` names its row the way `ENEMY_TYPES.path` names a `PATHS`
+  entry, so a sixth weapon arrives with its sound attached; the file itself stays in
+  `AUDIO.SFX` with that sound's pool and throttle, because the mix is only legible in
+  one column.
+
+  Three knobs per row, all spelled out rather than defaulted. **`pool`** is voices, so
+  a second copy can start before the first ends — 1 for anything that cannot overlap
+  itself. **`gap`** is enforced silence before the same event may retrigger, and it is
+  what stops a boss wave's kills or a Reaver chain's synchronised volley collapsing
+  into a wall of noise; 0 where the event's own cadence already spaces it (a gun's
+  `interval` is 150 ms at the fastest). **`vol`** is the mix: the things that happen
+  several times a second sit well under the ones that happen once a run. A `*_var*`
+  set never plays the same file twice running — three collision sounds exist so that
+  two hits do not sound identical, and a uniform roll repeats one time in three.
+
+  **Preloaded up front, unlike the music**, and the asymmetry is a size one: the whole
+  sfx set is ~1 MB against the four tracks' ~14, and a click that has to fetch its
+  file on the first press lands after the button it belongs to. (Chrome defers all
+  media fetching until the page's first gesture, which is the same gesture that
+  unlocks playback, so nothing is lost by asking early.)
+
+  **Where a sound is fired from is the same question as where its event lives.** The
+  two guns sound at their own CADENCE — `player.js` at the head of a volley, so a
+  staggered weapon reports once per trigger rather than five times across the
+  interval, and `shooters.js` in `fireVolley`. A burst that can only ever be one event
+  sounds itself in `explosions.js`, so there is exactly one place it can be forgotten
+  from. Everything else goes through the funnels `game.js` already had:
+  `Game.onPlayerHit` gained an `sfx` argument alongside the flash and the shake it
+  funnels, defaulting to `playerHit` so a new damage source arrives audible; and
+  `addScore` announces the boss wave it queues.
+
+  The armour counter crossing a layer boundary has no call of its own — the level is
+  DERIVED from `hits` (§7) and every writer moves it incidentally — so
+  `updateWeaponLevel` watches the derived value once a frame, after `updateDeath`.
+  That one watcher gets all four cases right with no `if` about which it was: a hit
+  that empties a layer falls, a heal at full armour rises, a heal inside a layer is
+  silent, and a ship swap is silent because §7 has it carry the level across a
+  different `base`.
+
+  The mapping of the delivered assets, where it was not obvious: `player_ship_hit` is
+  being shot (and the `−1` trap, which is the same damage path), `collision_var*` is
+  ramming a hull, `collision_asteroid` is a rock — §7's three damage sources, one
+  sound each. `boss_wave_start_large` is the doubled milestone and `_small` the
+  single. `bonus_taken` plays on every catch **except** the trap, which must not open
+  with the sound of a prize. `ship_changed` is the hull swap only; a weapon bubble is
+  just a catch. The wing is silent — it is an extension of the player's gun, not a
+  second one. `enemy explosion.mp3` is the one asset with a space in its name and is
+  percent-encoded in the table.
 
   **A TRACK IS A SLOT, and the music belongs to the HULL.** Each row of `SHIPS` names
   its own looping track, so a fourth hull arrives with its music attached; the title
@@ -760,7 +812,8 @@ Not yet settled — ask rather than assuming:
   runs and it finds nothing to do, rather than flickering the title track in behind a
   run that just left it.
 
-  **Only the title track is fetched at page load.** Elements are built with
+  **Of the MUSIC, only the title track is fetched at page load** — the sfx all are,
+  for the size reason above. Elements are built with
   `preload='none'` and `warm()` raises them: the title's when it is wanted, the hulls'
   when a run begins and a ship bonus could reach them. The four files are ~14 MB, and
   three of them are worth nothing until somebody presses START.

@@ -198,6 +198,13 @@ function updateWeapon(p, dt, firing, out) {
     p.volleyGapMs = wp.stagger ? wp.interval / n : 0;
     p.volleyNextMs = 0;
     p.fireMs = wp.interval;
+    // The gun's report belongs with the gun's CADENCE, which is this file's
+    // one job: fired here, at the head of the volley, it sounds once per
+    // trigger — where a call next to spawnBullet below would fire five times
+    // across the interval for a staggered weapon and turn Lightning into a
+    // rattle. The wing has its own cadence in wingmen.js and deliberately no
+    // sound: it is an extension of this gun, not a second one.
+    Sound.play(wp.sfx);
   }
 
   if (p.volleyLeft > 0) {

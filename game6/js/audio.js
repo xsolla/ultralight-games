@@ -1,22 +1,26 @@
 // ============================================================================
-// audio.js — Sound namespace: the game's background music.
-// Owns the <audio> elements, which track belongs where, and the volume tweens
-// that move between them. It is a READER of state, never an owner: game.js
-// says a run began, a hull changed, or the title screen is up, and the sound
-// button's three-state value arrives through applyState. No game state, no
-// drawing, no SFX yet — when those land they go here too, as the reference
-// game's preloaded pools.
+// audio.js — Sound namespace: the game's background music and its sound
+// effects. Owns the <audio> elements, which track belongs where, the volume
+// tweens that move between them, and the one-shot pools every sfx plays from.
+// It is a READER of state, never an owner: game.js says a run began, a hull
+// changed, or the title screen is up, and the sound button's three-state value
+// arrives through applyState. No game state, no drawing.
 //
 // A TRACK IS A SLOT, and the title screen's is the last one. The hulls take
 // slots 0..SHIPS.length-1 and the title takes TITLE_TRACK after them, so
 // switchTo() never learns which kind it is holding and the title screen gets
 // the crossfade, the fade and the sound button for free.
 //
+// AN SFX IS AN EVENT, not a file. Callers name what happened ('enemyExplosion',
+// 'uiClick') and never a path, so a *_var* set that grows a fourth variant, or
+// a sound that wants a different mix level, is a change in the AUDIO.SFX table
+// and nowhere else.
+//
 // HTMLAudioElement rather than Web Audio, for the reason CLAUDE.md §2 gives:
 // the fetch+decode route is blocked by CORS on file://, and this game must run
 // from a double-clicked index.html. The cost is iOS Safari, which ignores the
-// `volume` property — every fade there degrades to a cut, and nothing else
-// changes.
+// `volume` property — every fade there degrades to a cut and every per-sound
+// mix level degrades to full, and nothing else changes.
 //
 // Every entry point is guarded, so a missing or blocked file yields silence
 // rather than a broken run.
@@ -32,12 +36,140 @@ const AUDIO = {
   FADE_MS: 3000,       // ms for the run's music to leave when the title returns
   CROSSFADE_MS: 2000,  // ms for every other swap: old track out, new one in
   TICK_MS: 40,         // ms between volume steps — 25/s is below hearing a stair
+  SFX_VOLUME: 0.85,    // master sfx level, 0..1; every row's `vol` scales this
+
+  // ---- Sound effects ------------------------------------------------------
+  // One row per sound EVENT. `src` is a single file, or the list a *_var* set
+  // rolls between — the variants exist so a burst of the same event does not
+  // sound like one clip played twice, and pickVariant() below never repeats.
+  //
+  // Every knob is spelled out on every row rather than defaulted, because this
+  // table IS the game's mix and a defaulted number is one you cannot read off
+  // the page:
+  //   pool  voices kept for the event, so a second copy can start before the
+  //         first has finished. 1 is right for anything that cannot overlap
+  //         with itself — one ship, one wave, one turbo burst.
+  //   gap   ms of enforced silence after a play before the same event may fire
+  //         again. This is what stops a boss wave's kills or a Reaver chain's
+  //         volley collapsing into a wall of noise. 0 where the event's own
+  //         cadence already spaces it — a gun's `interval` is 150ms at the
+  //         fastest, which is further apart than any throttle would put it.
+  //   vol   0..1 on top of SFX_VOLUME. The mix in one column: the things that
+  //         happen several times a second sit well under the ones that happen
+  //         once a run.
+  //
+  // 'enemy explosion.mp3' is the one asset with a space in its name, so it is
+  // percent-encoded here — a bare space in a URL is tolerated by most engines
+  // and specified by none, and this file has to load off file:// too.
+  SFX: {
+    // ---- UI. Only the mouse hears the hover (see noteHover in game.js). ----
+    uiClick:  { src: 'assets/sfx/ui_click.mp3',     pool: 2, gap: 60, vol: 0.70 },
+    uiHover:  { src: 'assets/sfx/ui_mouseover.mp3', pool: 2, gap: 40, vol: 0.35 },
+
+    // ---- The player's gun, one row per WEAPONS row, named by its `sfx`. ----
+    // The quietest rows in the table by a distance, and they have to be: this is
+    // the sound the player hears most, up to seven times a second for the whole
+    // run, and it has to sit under everything it is being fired at rather than
+    // over it. Halved from the 0.30 they shipped at, which still crowded the
+    // kills the shots were earning.
+    weaponSpark:     { src: 'assets/sfx/weapon_spark.mp3',     pool: 3, gap: 0, vol: 0.15 },
+    weaponPlasma:    { src: 'assets/sfx/weapon_plasma.mp3',    pool: 3, gap: 0, vol: 0.15 },
+    weaponDagger:    { src: 'assets/sfx/weapon_dagger.mp3',    pool: 3, gap: 0, vol: 0.15 },
+    weaponFury:      { src: 'assets/sfx/weapon_fury.mp3',      pool: 3, gap: 0, vol: 0.15 },
+    weaponLightning: { src: 'assets/sfx/weapon_lightning.mp3', pool: 3, gap: 0, vol: 0.15 },
+
+    // Incoming fire. A Reaver chain is up to eight hulls each firing once a
+    // second, and a boss wave has every armed type on the field at once, so
+    // this is the throttled one: 70ms lets a genuine salvo read as several
+    // shots and collapses a chain firing in lockstep into one.
+    //
+    // Still above the player's own gun even after coming down from 0.35: it is
+    // the only warning a shot the player has to dodge gives, and a volley they
+    // cannot hear over their own trigger is a volley they find out about when
+    // it lands.
+    enemyFire: { pool: 3, gap: 70, vol: 0.245, src: [
+      'assets/sfx/enemy_fire_var1.mp3',
+      'assets/sfx/enemy_fire_var2.mp3',
+      'assets/sfx/enemy_fire_var3.mp3',
+      'assets/sfx/enemy_fire_var4.mp3',
+    ] },
+
+    // ---- Deaths ------------------------------------------------------------
+    // The deepest pool in the table: a level-5 fan clears a whole rank in one
+    // volley, and those kills landing as one sound would flatten the best
+    // moment the gun has.
+    enemyExplosion:  { src: 'assets/sfx/enemy%20explosion.mp3', pool: 4, gap: 55, vol: 0.55 },
+    playerExplosion: { src: 'assets/sfx/player_explosion.mp3',  pool: 1, gap: 0,  vol: 1.00 },
+
+    // ---- The three damage sources (CLAUDE.md §7), one sound each -----------
+    // Loud, and deliberately the loudest things in the table after the wreck:
+    // an armour layer is the only resource in the game.
+    playerHit:         { src: 'assets/sfx/player_ship_hit.mp3',   pool: 2, gap: 80, vol: 0.90 },
+    collisionAsteroid: { src: 'assets/sfx/collision_asteroid.mp3', pool: 2, gap: 80, vol: 0.90 },
+    collisionEnemy: { pool: 2, gap: 80, vol: 0.90, src: [
+      'assets/sfx/collision_var1.mp3',
+      'assets/sfx/collision_var2.mp3',
+      'assets/sfx/collision_var3.mp3',
+    ] },
+
+    // ---- Bonuses -----------------------------------------------------------
+    bonusTaken: { pool: 2, gap: 40, vol: 0.80, src: [
+      'assets/sfx/bonus_taken_var1.mp3',
+      'assets/sfx/bonus_taken_var2.mp3',
+      'assets/sfx/bonus_taken_var3.mp3',
+    ] },
+    shipChanged:   { src: 'assets/sfx/ship_changed.mp3',           pool: 1, gap: 0, vol: 0.80 },
+    turboOn:       { src: 'assets/sfx/afterburners_activated.mp3', pool: 1, gap: 0, vol: 0.70 },
+    turboOff:      { src: 'assets/sfx/afterburners_deactivated.mp3', pool: 1, gap: 0, vol: 0.70 },
+    wingmenAppear: { src: 'assets/sfx/wingmen_appear.mp3',         pool: 1, gap: 0, vol: 0.80 },
+
+    // ---- The armour counter crossing a layer boundary ----------------------
+    levelUp:   { src: 'assets/sfx/weapon_new_level_reached.mp3', pool: 1, gap: 0, vol: 0.90 },
+    levelDown: { src: 'assets/sfx/weapon_level_down.mp3',        pool: 1, gap: 0, vol: 0.90 },
+
+    // ---- Boss waves. `large` is the doubled milestone, `small` the single. --
+    bossSmall: { src: 'assets/sfx/boss_wave_start_small.mp3', pool: 1, gap: 0, vol: 0.90 },
+    bossLarge: { src: 'assets/sfx/boss_wave_start_large.mp3', pool: 1, gap: 0, vol: 0.90 },
+  },
 };
 
 // The slot after the hulls. A load-time read of SHIPS, which is legal because
 // data.js is ahead of this file in index.html's load order — the same one
 // exception SHOOTER_IDX in spawner.js takes.
 const TITLE_TRACK = SHIPS.length;
+
+// ---- Sfx pool helpers ------------------------------------------------------
+// One event's voices for a single file. Separate elements rather than one
+// element rewound, because rewinding cuts the copy that is already sounding —
+// which is exactly wrong for the events that arrive in bursts. preload='auto'
+// plus load() is what actually gets the bytes, the same pairing warm() uses.
+function makeSfxVoices(src, vol, n) {
+  const els = [];
+  for (let i = 0; i < n; i++) {
+    try {
+      const a = new Audio(src);
+      a.preload = 'auto';
+      a.volume = Math.min(1, AUDIO.SFX_VOLUME * vol);
+      a.load();
+      els.push(a);
+    } catch (e) { /* a file that will not build yields silence, not a throw */ }
+  }
+  return els;
+}
+
+// Which file of a *_var* set to play. Never the one that just played: the whole
+// reason three collision sounds shipped is that two hits in a row must not be
+// identical, and a plain uniform roll repeats one time in three.
+function pickVariant(pool) {
+  const n = pool.vars.length;
+  if (n < 2) return 0;
+  if (pool.last < 0) return Math.floor(Math.random() * n);
+  // Roll across the n-1 that are not `last`, then step over it — uniform over
+  // exactly the choices that are not a repeat, rather than a reroll loop.
+  let v = Math.floor(Math.random() * (n - 1));
+  if (v >= pool.last) v++;
+  return v;
+}
 
 const Sound = {
   tracks: [],       // slot -> HTMLAudioElement, or null if it wouldn't build
@@ -51,8 +183,14 @@ const Sound = {
   // anything plays — the title has its own track now — only whether a HULL
   // change means anything, which outside a run it does not.
   inRun: false,
+  // Sfx event key -> { vars: [{ els, idx }], last, gap, vol, at }. `at` is the
+  // performance.now() of the last play, which is what `gap` is measured from.
+  pools: {},
 
   musicEnabled() { return this.state === 'on'; },
+  // 'musicoff' keeps the feedback and drops only the music, which is the whole
+  // reason the button is three-state rather than a boolean (constants.js).
+  sfxEnabled() { return this.state !== 'off'; },
 
   // One element per slot, all built on first use. Cheap: nothing is fetched
   // until warm() asks for it, which matters because the four files together are
@@ -85,6 +223,76 @@ const Sound = {
     // this can never run on a track that is already playing, which load() would
     // rewind out from under itself.
     try { a.load(); } catch (e) { /* ignore */ }
+  },
+
+  // ---- Sound effects -------------------------------------------------------
+  // Build every pool and start it buffering. Called once from Game.init().
+  //
+  // Eager, unlike the music, and the asymmetry is a size one: the whole sfx set
+  // is about a megabyte against the four tracks' fourteen, and a click that has
+  // to fetch its file on the first press arrives after the button it belongs
+  // to. Nothing here plays, so the autoplay gate is not involved.
+  initSfx() {
+    if (typeof Audio === 'undefined') return;
+    for (const key of Object.keys(AUDIO.SFX)) {
+      const row = AUDIO.SFX[key];
+      const srcs = Array.isArray(row.src) ? row.src : [row.src];
+      this.pools[key] = {
+        vars: srcs.map((src) => ({ els: makeSfxVoices(src, row.vol, row.pool), idx: 0 })),
+        last: -1,
+        gap: row.gap,
+        // Far enough in the past that the first play of the run is never
+        // throttled, whatever performance.now() happens to read at page load.
+        at: -1e9,
+      };
+    }
+  },
+
+  // Fire a one-shot. An unknown key, a muted button, or a file that would not
+  // build all yield silence rather than throwing — the same guarantee every
+  // entry point in this file gives, and the reason call sites never test
+  // anything before calling.
+  play(key) {
+    if (!this.sfxEnabled()) return;
+    const pool = this.pools[key];
+    if (!pool) return;
+
+    // Throttled BEFORE a voice is chosen, so a burst being collapsed does not
+    // also walk the round-robin — otherwise the copy that IS audible gets
+    // rewound out from under itself by the ones being dropped.
+    const now = performance.now();
+    if (now - pool.at < pool.gap) return;
+    pool.at = now;
+
+    const v = pickVariant(pool);
+    pool.last = v;
+    const sub = pool.vars[v];
+    const a = sub.els[sub.idx];
+    if (!a) return;
+    sub.idx = (sub.idx + 1) % sub.els.length;
+    try {
+      a.currentTime = 0;
+      const p = a.play();
+      // Rejects while the page is still untouched, or if the file is missing.
+      if (p && p.catch) p.catch(() => {});
+    } catch (e) { /* ignore */ }
+  },
+
+  // Cut every sfx still sounding. Only the walk to 'off' calls this: the button
+  // is an instruction rather than a transition, and a three-second afterburner
+  // still running after the player asked for silence reads as it not having
+  // worked. Music is paused rather than rewound because it has a position worth
+  // keeping; a one-shot does not.
+  hushSfx() {
+    for (const key of Object.keys(this.pools)) {
+      for (const sub of this.pools[key].vars) {
+        for (const a of sub.els) {
+          if (a.paused) continue;
+          a.pause();
+          try { a.currentTime = 0; } catch (e) { /* ignore */ }
+        }
+      }
+    }
   },
 
   // ---- Public entry points -------------------------------------------------
@@ -127,7 +335,7 @@ const Sound = {
   // begun the run's music by the time this runs, and it finds nothing to do
   // rather than flickering the title track in behind it.
   resume() {
-    if (this.current >= 0) this.play(this.current);
+    if (this.current >= 0) this.playTrack(this.current);
   },
 
   // The hull changed mid-run (a ship bonus). Catching the hull already being
@@ -143,6 +351,7 @@ const Sound = {
   // 'musicoff' -> 'on' picks the track up where it was left.
   applyState(state) {
     this.state = state;
+    if (!this.sfxEnabled()) this.hushSfx();
     if (!this.tracks.length) return;   // nothing built yet; nothing to align
     if (this.musicEnabled()) this.resume();
     else for (const a of this.tracks) if (a && !a.paused) a.pause();
@@ -167,7 +376,7 @@ const Sound = {
       // Already ours. The only tween that can be running on it is a fade-out
       // (left for the title, then came straight back), so undo that.
       this.tween(i, AUDIO.VOLUME, ms, false);
-      this.play(i);
+      this.playTrack(i);
       return;
     }
     this.current = i;
@@ -181,10 +390,12 @@ const Sound = {
     // back sound continuous.
     if (ms > 0 && next.paused) next.volume = 0;
     this.tween(i, AUDIO.VOLUME, ms, false);
-    this.play(i);
+    this.playTrack(i);
   },
 
-  play(i) {
+  // Music only — `play` above is the sfx entry point, and the two must not be
+  // confused: this one takes a SLOT and that one takes an event key.
+  playTrack(i) {
     const a = this.tracks[i];
     if (!a || !this.musicEnabled() || !a.paused) return;
     const p = a.play();

@@ -7,6 +7,14 @@
 // (collide.js reports that, game.js acts on it), and it does not draw —
 // render.js reads these objects and paints them.
 //
+// A burst that can only ever be one event SOUNDS ITSELF, because there is then
+// exactly one place the sound can be forgotten from: explodeEnemy is the enemy
+// death and explodeShip is the wreck, whoever called them. explodeImpact does
+// not, and cannot — the player's three damage sources share that one burst and
+// differ only in what landed the hit, which is knowledge the caller has. That
+// sound goes through Game.onPlayerHit instead, alongside the flash and the
+// shake it already funnels (CLAUDE.md §7).
+//
 // There is still no explosion atlas (CLAUDE.md §6), so a burst borrows an ENEMY
 // atlas's brightest charge frame as its fireball silhouette. Those frames are
 // already a radial spike-and-glow shape, which is what an explosion wants, and
@@ -150,6 +158,10 @@ function explodeEnemy(list, e) {
   b.puffs[0].oy = 0;
   b.puffs[0].rot = e.rot;
   pushBurst(list, b);
+  // After pushBurst, which is where the ceiling is enforced — but sounded
+  // unconditionally even so. A kill dropped from the list to keep the frame
+  // budget still happened, and hearing it is cheaper than seeing it.
+  Sound.play('enemyExplosion');
 }
 
 // A hit landing on the player, drawn at the ship's own centre.
@@ -182,6 +194,11 @@ function explodeImpact(list, x, y, color, spark) {
 // accents first, then WRECK_PALETTE — scattered over the hull and staggered so
 // they go off in a ragged chain rather than as one flash.
 function explodeShip(list, p) {
+  // Once, up front, for the whole ragged chain below: the wreck is one event
+  // however many sub-bursts it is drawn from, and one sound per puff would be
+  // twelve overlapping copies of the loudest clip in the table.
+  Sound.play('playerExplosion');
+
   const ship = SHIPS[p.ship];
   const palette = [
     { color: ship.color, spark: ship.spark, row: WRECK_SHIP_ROWS[0] },
