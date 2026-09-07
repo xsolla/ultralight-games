@@ -65,6 +65,7 @@ const Game = (() => {
     Quality.init();
     Quality.setOnChange(onQualityChange);
     Glow.warm();
+    Atmos.warm();
     Input.init();
     HUD.init();
     Title.init();
@@ -133,6 +134,7 @@ const Game = (() => {
   // anything else sized by the tier is rebuilt.
   function onQualityChange() {
     initStars();
+    Title.onQualityChange();
     scoreCache.key = null;
     gameoverCache.key = null;
   }
@@ -612,7 +614,7 @@ const Game = (() => {
     ctx.save();
     // Track
     ctx.fillStyle = 'rgba(255,255,255,0.08)';
-    roundRect(ctx, bx, by, barW, barH, 2);
+    UI.roundRect(ctx, bx, by, barW, barH, 2);
     ctx.fill();
 
     // Fill — hue shifts cyan → red as speed increases
@@ -621,11 +623,11 @@ const Game = (() => {
       // A faint wider band replaces the 6px shadow — imperceptible on a 3px bar.
       ctx.fillStyle   = `hsl(${barHue}, 100%, 65%)`;
       ctx.globalAlpha = 0.22;
-      roundRect(ctx, bx, by - 2, barW * pct, barH + 4, 3);
+      UI.roundRect(ctx, bx, by - 2, barW * pct, barH + 4, 3);
       ctx.fill();
       ctx.fillStyle   = `hsl(${barHue}, 100%, 55%)`;
       ctx.globalAlpha = 0.7;
-      roundRect(ctx, bx, by, barW * pct, barH, 2);
+      UI.roundRect(ctx, bx, by, barW * pct, barH, 2);
       ctx.fill();
     }
     ctx.restore();
@@ -725,12 +727,67 @@ const Game = (() => {
   // The game-over panel is a stack of glowing text and gradient buttons that never
   // changes once it appears — score, best and newBest are all fixed at death. Bake
   // the whole panel once and blit it; only the dimming overlay is drawn live.
+  //
+  // Layout, top to bottom: a header band carrying "GAME OVER" as a small tracked
+  // label; the run's score as the largest element on the panel; a new-best badge in
+  // a reserved slot; a two-cell stat row for best and mode; then the two actions at
+  // the same width, so the button block reads as one column.
   const gameoverCache = { key: null, canvas: null };
-  const GO_PAD = 50;   // room for the panel's 40px glow
+  const GO_PAD = 54;   // room for the panel's glow
+
+  // A centred pill holding an optional bright value and a small tracked label. The
+  // pill is sized to its own content rather than to a fixed width, so "NEW BEST"
+  // and "1240 TO BEAT" both come out snug.
+  function drawVerdictPill(g, cx, label, value, color, star) {
+    const bh = C.GO_BADGE_H, by = C.GO_BADGE_Y;
+
+    g.textBaseline = 'middle';
+    g.font = 'bold 10px monospace';
+    const labelW = UI.trackedWidth(g, label, 2.5);
+    g.font = 'bold 13px monospace';
+    const valueW = value ? g.measureText(value).width : 0;
+    const starR  = star ? 4.5 : 0;
+    const gap    = 9;
+    const runW   = (star ? starR * 2 + gap : 0) + (value ? valueW + gap : 0) + labelW;
+    const bw     = runW + 30;
+    const bx     = cx - bw / 2;
+    let   x      = cx - runW / 2;
+    const midY   = by + bh / 2;
+
+    g.fillStyle   = star ? 'rgba(255,215,64,0.13)' : 'rgba(255,255,255,0.045)';
+    g.strokeStyle = star ? 'rgba(255,215,64,0.5)'  : 'rgba(150,180,220,0.26)';
+    g.lineWidth   = 1;
+    UI.roundRect(g, bx, by, bw, bh, bh / 2);
+    g.fill();
+    g.stroke();
+
+    g.shadowBlur  = 8;
+    g.shadowColor = color;
+    if (star) {
+      g.fillStyle = color;
+      UI.starGlyph(g, x + starR, midY, starR);
+      x += starR * 2 + gap;
+    }
+    if (value) {
+      g.font      = 'bold 13px monospace';
+      g.fillStyle = color;
+      g.textAlign = 'left';
+      g.fillText(value, x, midY + 1);
+      g.textAlign = 'center';
+      x += valueW + gap;
+    }
+    g.shadowBlur = star ? 8 : 0;
+    g.font       = 'bold 10px monospace';
+    g.fillStyle  = star ? color : 'rgba(255,255,255,0.38)';
+    UI.fillTracked(g, label, x + labelW / 2, midY + 1, 2.5);
+
+    g.shadowBlur   = 0;
+    g.textBaseline = 'alphabetic';
+  }
 
   function bakeGameover() {
     const pw = C.GO_PANEL_W, ph = C.GO_PANEL_H;
-    const key = score + '|' + bestScore + '|' + (newBest ? 1 : 0);
+    const key = score + '|' + bestScore + '|' + (newBest ? 1 : 0) + '|' + difficulty;
     if (gameoverCache.key === key) return;
 
     if (!gameoverCache.canvas) gameoverCache.canvas = document.createElement('canvas');
@@ -748,93 +805,167 @@ const Game = (() => {
     g.save();
     g.translate(GO_PAD, GO_PAD);
 
-    const cx = pw / 2;
+    const cx  = pw / 2;
     const isNewBest = newBest;
+    const R   = 22;
+    const accent = isNewBest ? C.POWERUP_MULT_COLOR : '#00e5ff';
 
-    // Panel
-    g.fillStyle   = 'rgba(10,10,30,0.88)';
-    g.strokeStyle = isNewBest ? 'rgba(255,215,0,0.35)' : 'rgba(255,255,255,0.1)';
-    g.lineWidth   = isNewBest ? 2 : 1.5;
-    g.shadowBlur  = isNewBest ? 30 : 40;
+    // ── Panel body ────────────────────────────────────────────────────────
+    // A vertical gradient rather than a flat fill, so the panel has a lit top
+    // edge and settles into the dimmed play field at its foot.
+    g.shadowBlur  = 20;
     g.shadowColor = isNewBest ? C.POWERUP_MULT_COLOR : C.DEADLY_COLOR;
-    roundRect(g, 0, 0, pw, ph, 20);
+    const body = g.createLinearGradient(0, 0, 0, ph);
+    body.addColorStop(0,    'rgba(18,20,44,0.95)');
+    body.addColorStop(0.55, 'rgba(11,12,30,0.93)');
+    body.addColorStop(1,    'rgba(7,8,20,0.95)');
+    g.fillStyle = body;
+    UI.roundRect(g, 0, 0, pw, ph, R);
     g.fill();
     g.shadowBlur = 0;
+
+    g.strokeStyle = isNewBest ? 'rgba(255,215,64,0.42)' : 'rgba(150,180,220,0.20)';
+    g.lineWidth   = isNewBest ? 1.75 : 1.25;
+    UI.roundRect(g, 0, 0, pw, ph, R);
     g.stroke();
 
-    // GAME OVER
-    g.textAlign   = 'center';
-    g.font        = 'bold 52px monospace';
-    g.shadowBlur  = 28;
+    // ── Header band ───────────────────────────────────────────────────────
+    // Clipped to the panel so its fill follows the top two corner radii.
+    g.save();
+    UI.roundRect(g, 0, 0, pw, ph, R);
+    g.clip();
+    const hdr = g.createLinearGradient(0, 0, 0, C.GO_HEADER_H);
+    hdr.addColorStop(0, 'rgba(255,23,68,0.16)');
+    hdr.addColorStop(1, 'rgba(255,23,68,0)');
+    g.fillStyle = hdr;
+    g.fillRect(0, 0, pw, C.GO_HEADER_H);
+    g.restore();
+
+    // "GAME" white, "OVER" red, laid out as one tracked run so the two words stay
+    // centred together rather than each being centred on its own.
+    g.textBaseline = 'alphabetic';
+    g.font        = 'bold 23px monospace';
+    const tt      = 5, wordGap = 14;
+    const wGame   = UI.trackedWidth(g, 'GAME', tt);
+    const wOver   = UI.trackedWidth(g, 'OVER', tt);
+    const hSX     = cx - (wGame + wordGap + wOver) / 2;
+    g.shadowBlur  = 20;
     g.shadowColor = C.DEADLY_COLOR;
     g.fillStyle   = '#ffffff';
-    g.fillText('GAME', cx, 60);
+    UI.fillTracked(g, 'GAME', hSX + wGame / 2, C.GO_TITLE_Y, tt);
     g.fillStyle   = C.DEADLY_COLOR;
-    g.fillText('OVER', cx, 118);
-
-    // Score
-    g.shadowColor = isNewBest ? C.POWERUP_MULT_COLOR : '#00e5ff';
-    g.shadowBlur  = 18;
-    g.fillStyle   = isNewBest ? C.POWERUP_MULT_COLOR : '#ffffff';
-    g.font        = 'bold 30px monospace';
-    g.fillText(score, cx, 166);
-
-    if (isNewBest) {
-      g.font       = 'bold 12px monospace';
-      g.shadowBlur = 10;
-      g.fillStyle  = C.POWERUP_MULT_COLOR;
-      g.fillText('★  NEW BEST  ★', cx, 200);
-    } else {
-      g.font       = 'bold 13px monospace';
-      g.shadowBlur = 0;
-      g.fillStyle  = 'rgba(255,255,255,0.4)';
-      g.fillText(`BEST  ${bestScore}`, cx, 202);
-    }
-
-    // Divider
-    g.strokeStyle = 'rgba(255,255,255,0.1)';
-    g.lineWidth   = 1;
+    UI.fillTracked(g, 'OVER', hSX + wGame + wordGap + wOver / 2, C.GO_TITLE_Y, tt);
     g.shadowBlur  = 0;
+
+    // Underline the band, brightest in the middle: a flat hairline across a
+    // 322px panel reads as a hard seam, a fading one reads as a light break.
+    const seam = g.createLinearGradient(0, 0, pw, 0);
+    seam.addColorStop(0,   'rgba(255,23,68,0)');
+    seam.addColorStop(0.5, 'rgba(255,23,68,0.5)');
+    seam.addColorStop(1,   'rgba(255,23,68,0)');
+    UI.rule(g, 1, pw - 1, C.GO_HEADER_H, seam);
+
+    // ── Score ─────────────────────────────────────────────────────────────
+    g.font        = 'bold 9px monospace';
+    g.shadowBlur  = 0;
+    g.fillStyle   = 'rgba(255,255,255,0.34)';
+    UI.fillTracked(g, 'SCORE', cx, C.GO_SCORE_LABEL_Y, 3.5);
+
+    g.font        = 'bold 56px monospace';
+    g.shadowBlur  = 26;
+    g.shadowColor = accent;
+    g.fillStyle   = isNewBest ? C.POWERUP_MULT_COLOR : '#ffffff';
+    UI.fillTracked(g, String(score), cx, C.GO_SCORE_Y, 1);
+    g.shadowBlur  = 0;
+
+    // ── Verdict pill ──────────────────────────────────────────────────────
+    // One slot, two readings: a run that beat the record gets a gold badge, and one
+    // that did not gets the gap it has to close. Either way the slot is filled, so
+    // the panel has no hole in it and the player leaves with a target.
+    // The one case with nothing to say is a 0 against a 0.
+    const behind = bestScore - score;
+    if (isNewBest)      drawVerdictPill(g, cx, 'NEW BEST', null, C.POWERUP_MULT_COLOR, true);
+    else if (behind > 0) drawVerdictPill(g, cx, 'TO BEAT', String(behind), '#8ff2ff', false);
+
+    // ── Stat row ──────────────────────────────────────────────────────────
+    // Two cells, hairline-framed: the run in context (best) and the run's terms
+    // (mode). Symmetrical cells are what make this read as a scoreboard.
+    const hair = 'rgba(150,180,220,0.16)';
+    UI.rule(g, 24, pw - 24, C.GO_STATS_TOP, hair);
+    UI.rule(g, 24, pw - 24, C.GO_STATS_BOTTOM, hair);
+    g.strokeStyle = hair;
+    g.lineWidth   = 1;
     g.beginPath();
-    g.moveTo(30, 222);
-    g.lineTo(pw - 30, 222);
+    g.moveTo(Math.round(cx) + 0.5, C.GO_STATS_TOP + 9);
+    g.lineTo(Math.round(cx) + 0.5, C.GO_STATS_BOTTOM - 9);
     g.stroke();
 
-    // Play Again
+    const cellMid = [cx / 2 + 12, cx + cx / 2 - 12];
+    const labelY  = C.GO_STATS_TOP + 21;
+    const valueY  = C.GO_STATS_TOP + 43;
+    const cells = [
+      ['BEST', String(bestScore), isNewBest ? C.POWERUP_MULT_COLOR : '#8ff2ff'],
+      ['MODE', difficulty.toUpperCase(), C.DIFF_COLORS[difficulty] || '#8ff2ff'],
+    ];
+    cells.forEach(([label, value, color], i) => {
+      g.font      = 'bold 8px monospace';
+      g.fillStyle = 'rgba(255,255,255,0.3)';
+      UI.fillTracked(g, label, cellMid[i], labelY, 2.5);
+      g.font        = 'bold 16px monospace';
+      g.shadowBlur  = 8;
+      g.shadowColor = color;
+      g.fillStyle   = color;
+      UI.fillTracked(g, value, cellMid[i], valueY, 1);
+      g.shadowBlur  = 0;
+    });
+
+    // ── Play again (primary) ──────────────────────────────────────────────
     const paW = C.GO_PLAY_W, paH = C.GO_PLAY_H;
-    const paX = cx - paW / 2, paY = C.GO_PLAY_Y;
+    const paX = cx - paW / 2, paY = C.GO_PLAY_Y, paR = 15;
     const paGrad = g.createLinearGradient(paX, paY, paX, paY + paH);
-    paGrad.addColorStop(0, '#00c8e0');
-    paGrad.addColorStop(1, '#007a96');
-    g.shadowBlur  = 18;
+    paGrad.addColorStop(0,    '#22d8ee');
+    paGrad.addColorStop(0.52, '#00bcd8');
+    paGrad.addColorStop(1,    '#0079a0');
+    g.shadowBlur  = 22;
     g.shadowColor = '#00e5ff';
     g.fillStyle   = paGrad;
-    roundRect(g, paX, paY, paW, paH, 13);
+    UI.roundRect(g, paX, paY, paW, paH, paR);
     g.fill();
-    g.strokeStyle = 'rgba(255,255,255,0.28)';
-    g.lineWidth   = 1.5;
-    g.shadowBlur  = 0;
-    roundRect(g, paX, paY, paW, paH, 13);
-    g.stroke();
-    g.fillStyle   = '#ffffff';
-    g.font        = 'bold 19px monospace';
-    g.shadowBlur  = 10;
-    g.shadowColor = '#ffffff';
-    g.fillText('▶  PLAY AGAIN', cx, paY + paH / 2 + 1);
+    g.shadowBlur = 0;
 
-    // Quit
+    UI.topHighlight(g, paX, paY, paW, paH, paR, 0.32);
+    g.strokeStyle = 'rgba(255,255,255,0.4)';
+    g.lineWidth   = 1.5;
+    UI.roundRect(g, paX, paY, paW, paH, paR);
+    g.stroke();
+
+    g.textBaseline = 'middle';
+    g.font         = 'bold 19px monospace';
+    const paLblW = UI.trackedWidth(g, 'PLAY AGAIN', 2.5);
+    const paGH   = 8.5, paGW = paGH * 1.05, paGap = 13;
+    const paRun  = paGW + paGap + paLblW;
+    const paSX   = cx - paRun / 2, paMY = paY + paH / 2;
+    g.fillStyle   = '#ffffff';
+    g.shadowBlur  = 11;
+    g.shadowColor = '#ffffff';
+    UI.playGlyph(g, paSX + paGW / 2, paMY, paGH);
+    UI.fillTracked(g, 'PLAY AGAIN', paSX + paGW + paGap + paLblW / 2, paMY + 1, 2.5);
+    g.shadowBlur = 0;
+
+    // ── Quit (secondary) ──────────────────────────────────────────────────
+    // Same width as the primary, ghosted rather than filled: the pair reads as a
+    // ranked column instead of two unrelated chips.
     const qW = C.GO_QUIT_W, qH = C.GO_QUIT_H;
     const qX = cx - qW / 2, qY = C.GO_QUIT_Y;
-    g.shadowBlur  = 0;
-    g.fillStyle   = 'rgba(255,255,255,0.07)';
-    g.strokeStyle = 'rgba(255,255,255,0.14)';
+    g.fillStyle   = 'rgba(255,255,255,0.045)';
+    g.strokeStyle = 'rgba(150,180,220,0.28)';
     g.lineWidth   = 1;
-    roundRect(g, qX, qY, qW, qH, 10);
+    UI.roundRect(g, qX, qY, qW, qH, 12);
     g.fill();
     g.stroke();
-    g.fillStyle  = 'rgba(255,255,255,0.48)';
-    g.font       = 'bold 14px monospace';
-    g.fillText('QUIT', cx, qY + qH / 2 + 1);
+    g.font      = 'bold 13px monospace';
+    g.fillStyle = 'rgba(230,238,248,0.62)';
+    UI.fillTracked(g, 'QUIT', cx, qY + qH / 2 + 1, 3);
 
     g.restore();
     gameoverCache.key = key;
@@ -849,20 +980,6 @@ const Game = (() => {
     ctx.fillStyle = 'rgba(0,0,0,0.68)';
     ctx.fillRect(0, 0, C.CANVAS_W, C.CANVAS_H);
     ctx.drawImage(gameoverCache.canvas, o.x - GO_PAD, o.y - GO_PAD);
-  }
-
-  function roundRect(ctx, x, y, w, h, r) {
-    ctx.beginPath();
-    ctx.moveTo(x + r, y);
-    ctx.lineTo(x + w - r, y);
-    ctx.arcTo(x + w, y,     x + w, y + r,     r);
-    ctx.lineTo(x + w, y + h - r);
-    ctx.arcTo(x + w, y + h, x + w - r, y + h, r);
-    ctx.lineTo(x + r, y + h);
-    ctx.arcTo(x,     y + h, x,     y + h - r, r);
-    ctx.lineTo(x, y + r);
-    ctx.arcTo(x,     y,     x + r, y,         r);
-    ctx.closePath();
   }
 
   function render() {

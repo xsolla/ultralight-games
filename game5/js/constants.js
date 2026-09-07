@@ -147,6 +147,10 @@ const C = {
   ROTATE_SPEED_TOUCH: 0.012,    // radians per px of swipe delta
   DRAG_CLICK_THRESHOLD: 6,      // px of pointer travel before a press stops counting as a tap
 
+  // One colour per mode, shared by the title screen's selector and the game-over
+  // panel's MODE cell so the two screens agree on what "hard" looks like.
+  DIFF_COLORS: { easy: '#69ff47', normal: '#00e5ff', hard: '#ff1744' },
+
   // --- Difficulty presets (override base values) ---
   DIFFICULTY: {
     easy: {
@@ -173,20 +177,64 @@ const C = {
   },
 
   // --- Title screen ---
+  // Layout is a single vertical rhythm, all measured in canvas space. The logo
+  // lockup sits at the top, the helix emblem in the middle, and the interactive
+  // block (best / difficulty / play) is grouped at the bottom over a scrim so it
+  // reads as one panel rather than three floating rows.
   TITLE_HELIX_SPEED: 0.6,       // rotation speed of preview helix
-  TITLE_RING_COUNT: 8,
+  TITLE_RING_COUNT: 6,
+  TITLE_RING_TOP_Y: 226,        // y of the topmost preview ring
+  TITLE_RING_SPACING: 33,
+  TITLE_RING_SCALE: 0.68,       // preview is a scaled-down copy of the real tower
+
+  TITLE_LOGO_Y1: 122,           // "HELIX" baseline
+  TITLE_LOGO_Y2: 164,           // "FALL" baseline
+  TITLE_TAGLINE_Y: 190,
+  TITLE_BEST_Y: 434,            // top of the best-score pill
+  TITLE_BEST_W: 156, TITLE_BEST_H: 34,
+  TITLE_DIFF_CAPTION_Y: 502,    // caption baseline
+  TITLE_DIFF_Y: 514,            // top of the segmented control
+  TITLE_DIFF_W: 276, TITLE_DIFF_H: 44,
+  TITLE_DIFF_PAD: 4,            // inset of a cell inside the control
+  TITLE_DIFF_NOTE_Y: 578,       // per-difficulty descriptor baseline
+  TITLE_PLAY_Y: 600,
+  TITLE_PLAY_W: 224, TITLE_PLAY_H: 62,
+  TITLE_HINT_Y: 700,
+  // Vertical scrim that grounds the bottom UI block against the atmosphere.
+  TITLE_SCRIM_TOP: 396,
+  TITLE_SCRIM_ALPHA: 0.55,
+
+  // --- Title atmosphere (god rays + bokeh) ---
+  // The rays fan out from a source above the canvas, so the brightest part of the
+  // cone is off-screen and the shafts sweep down across the tower.
+  RAY_ORIGIN_X: 202.5,
+  RAY_ORIGIN_Y: -150,
+  RAY_SPREAD: 0.74,             // half-angle of the fan, radians from straight down
+  RAY_LEN: 860,
+  RAY_WIDTH: 104,               // width of a shaft at its far end
+  // Kept low on purpose: shafts have to stay separated by dark gaps or the fan
+  // stops reading as light through something and becomes fog.
+  RAY_ALPHA: 0.055,             // per-shaft peak alpha, before its own pulse
+  RAY_POOL_ALPHA: 0.06,         // the soft pool at the source
+  RAY_COLOR: '#00e5ff',
+  RAY_COLOR_ALT: '#8f7cff',     // every third shaft, for a little chromatic split
+  BOKEH_COLORS: ['#00e5ff', '#8f7cff', '#aaddff', '#ffd740', '#00ffcc'],
 
   // --- Adaptive quality ---
   // Frame time is sampled every frame; sustained slowness steps the tier down and
   // sustained headroom steps it back up. See quality.js.
   QUALITY_ORDER: ['high', 'med', 'low'],
+  // rayCount / bokehCount are title-screen only — see atmos.js.
   QUALITY: {
     high: { ringHaloBands: 2, ringSteps: 8, particleScale: 1.0,  trailLength: 22,
-            starCount: 70, starTwinkle: 15, debrisMax: 64, gasIntervalMult: 1.0, gas: true },
+            starCount: 70, starTwinkle: 15, debrisMax: 64, gasIntervalMult: 1.0, gas: true,
+            rayCount: 9, bokehCount: 18 },
     med:  { ringHaloBands: 1, ringSteps: 6, particleScale: 0.6,  trailLength: 14,
-            starCount: 45, starTwinkle: 8,  debrisMax: 40, gasIntervalMult: 1.8, gas: true },
+            starCount: 45, starTwinkle: 8,  debrisMax: 40, gasIntervalMult: 1.8, gas: true,
+            rayCount: 8,  bokehCount: 12 },
     low:  { ringHaloBands: 0, ringSteps: 5, particleScale: 0.35, trailLength: 8,
-            starCount: 28, starTwinkle: 0,  debrisMax: 22, gasIntervalMult: 3.0, gas: false },
+            starCount: 28, starTwinkle: 0,  debrisMax: 22, gasIntervalMult: 3.0, gas: false,
+            rayCount: 5,  bokehCount: 6 },
   },
   QUALITY_DOWN_MS: 20,          // rolling average above this is too slow
   QUALITY_UP_MS: 13,            // rolling average below this has headroom to spare
@@ -235,11 +283,23 @@ const C = {
   // Single source of truth: the panel is baked, blitted and hit-tested from these,
   // so a layout tweak cannot leave the clickable rects out of sync with the drawn
   // ones. All the *_Y values are panel-local (measured from the panel's top edge).
-  GO_PANEL_W: 300,
-  GO_PANEL_H: 376,             // QUIT ends at 340, leaving 36px below it
-  GO_PANEL_DY: -20,            // panel centre offset from the canvas centre
-  GO_PLAY_W: 200, GO_PLAY_H: 52, GO_PLAY_Y: 236,
-  GO_QUIT_W: 130, GO_QUIT_H: 40, GO_QUIT_Y: 300,
+  //
+  // The hierarchy is deliberately inverted from the obvious one: "GAME OVER" is a
+  // small tracked label in a header band, and the score — the thing the player
+  // actually came back for — is the largest element on the panel.
+  GO_PANEL_W: 322,
+  GO_PANEL_H: 400,             // QUIT ends at 384, leaving a 16px foot
+  GO_PANEL_DY: -8,             // panel centre offset from the canvas centre
+  GO_HEADER_H: 64,             // header band, hairline along its bottom edge
+  GO_TITLE_Y: 41,              // "GAME OVER" baseline
+  GO_SCORE_LABEL_Y: 94,
+  GO_SCORE_Y: 148,             // big score baseline
+  GO_BADGE_Y: 164,             // top of the verdict pill (new best / gap to beat)
+  GO_BADGE_H: 26,
+  GO_STATS_TOP: 206,           // hairline above the two-cell stat row
+  GO_STATS_BOTTOM: 258,        // hairline below it
+  GO_PLAY_W: 240, GO_PLAY_H: 54, GO_PLAY_Y: 278,
+  GO_QUIT_W: 240, GO_QUIT_H: 42, GO_QUIT_Y: 342,
 
   // --- Background music ---
   // Two tracks, streamed via <audio>. Deliberately not decodeAudioData: a ~1.9MB

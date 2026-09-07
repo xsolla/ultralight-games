@@ -18,7 +18,8 @@ Single player, no AI needed. Three difficulty modes on title screen:
 - **Hard**: Fast escalation, narrow gaps, fewer power-ups, red segments can move
 
 ## Screens
-1. **Title Screen** — Game logo, animated helix preview, difficulty selector, Play button, best score
+1. **Title Screen** — Logo lockup over an animated helix preview, atmospheric god rays
+   and bokeh, best-score pill, segmented difficulty selector, Play button
 2. **Gameplay Screen** — Helix tower, falling ball, HUD overlay
 3. **Game Over Screen** — Score, best score, Play Again / Quit buttons (overlaid on gameplay screen)
 
@@ -52,6 +53,8 @@ js/
   particles.js      — Particle system for visual effects
   hud.js            — HUD rendering and button logic
   title.js          — Title screen rendering and logic
+  atmos.js          — Title-screen atmosphere: god rays, bokeh
+  ui.js             — Shared UI primitives: rounded rects, tracked text, glyphs
   input.js          — Keyboard, touch, mouse input handling
   audio.js          — Web Audio API sound/music generation
 ```
