@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>SpriteKit harness</title>
+<style>
+  body { margin: 0; background: #06080d; color: #8aa0bd;
+         font: 12px system-ui, -apple-system, "Segoe UI", sans-serif; }
+  canvas { display: block; margin: 0 auto; image-rendering: auto; }
+  #status { text-align: center; padding: 8px; }
+</style>
+</head>
+<body>
+<div id="status">loading…</div>
+<canvas id="c" width="1000" height="720"></canvas>
+
+<!-- Absolute path so this harness works from the scratchpad, outside the repo. -->
+<script src="spaceships_sprites.js"></script>
+<script>
+SpriteKit.basePath = 'file:///C:/Projects/ultralight-games/game6/assets/sprites/';
+
+const cv = document.getElementById('c');
+const ctx = cv.getContext('2d');
+ctx.imageSmoothingEnabled = true;   // per the usage contract
+
+const label = (t, x, y) => {
+  ctx.fillStyle = '#8aa0bd';
+  ctx.font = '11px system-ui, -apple-system, "Segoe UI", sans-serif';
+  ctx.fillText(t, x, y);
+};
+
+SpriteKit.load((ok) => {
+  document.getElementById('status').textContent = ok
+    ? 'all 5 atlases loaded — ' + Object.keys(SpriteKit.imgs).join(', ')
+    : 'SOME ATLASES FAILED — placeholders showing';
+  requestAnimationFrame(frame);
+});
+
+function frame(t) {
+  ctx.clearRect(0, 0, cv.width, cv.height);
+
+  // ---- Ships: every frame of every row, at 4x so the hull can be watched ---
+  // CORRECT = the hull is dead still across a row and only the plume moves.
+  label('ships — 3 rows x 6 frames, drawn at 4x (hull must not bob)', 10, 16);
+  for (let r = 0; r < 3; r++) {
+    for (let c = 0; c < 6; c++) {
+      SpriteKit.drawShip(ctx, r, c, 40 + c * 60, 60 + r * 90, 42);
+      // A rule at the hull centre: the sprite must stay registered to it.
+      ctx.strokeStyle = 'rgba(255,80,80,0.35)';
+      ctx.beginPath();
+      ctx.moveTo(14 + c * 60, 60 + r * 90); ctx.lineTo(66 + c * 60, 60 + r * 90);
+      ctx.stroke();
+    }
+    label(SpriteKit.SHIP_SPRITES[r].name, 390, 60 + r * 90);
+  }
+
+  // ---- Ships animated, side by side with turbo ----------------------------
+  label('animated: normal / turbo', 470, 16);
+  for (let r = 0; r < 3; r++) {
+    SpriteKit.drawShip(ctx, r, SpriteKit.shipFrame(t, false), 500, 60 + r * 90,
+                       SpriteKit.SHIP_SPRITES[r].dispW);
+    SpriteKit.drawShip(ctx, r, SpriteKit.shipFrame(t, true), 560, 60 + r * 90,
+                       SpriteKit.SHIP_SPRITES[r].dispW);
+  }
+
+  // ---- Bullets: one per row, animated, tip pinned to a rule ---------------
+  label('bullets — tip must stay on the line', 620, 16);
+  SpriteKit.PARTICLE_SPRITES.forEach((p, i) => {
+    const x = 650 + i * 40, y = 40;
+    ctx.strokeStyle = 'rgba(255,80,80,0.35)';
+    ctx.beginPath(); ctx.moveTo(x - 16, y); ctx.lineTo(x + 16, y); ctx.stroke();
+    ctx.save();
+    ctx.translate(x, y);
+    SpriteKit.drawBullet(ctx, p.row, SpriteKit.bulletFrame(t), p.dispW * 2);
+    ctx.restore();
+    label(p.key, x - 14, 150);
+  });
+
+  // ---- Bullets rotated, to prove the pivot is the tip --------------------
+  label('rotated 30° — pivot is the tip', 620, 175);
+  SpriteKit.PARTICLE_SPRITES.forEach((p, i) => {
+    ctx.save();
+    ctx.translate(650 + i * 40, 195);
+    ctx.rotate(Math.PI / 6);
+    SpriteKit.drawBullet(ctx, p.row, SpriteKit.bulletFrame(t), p.dispW * 2);
+    ctx.restore();
+  });
+
+  // ---- Enemies: all 10 rows, frame 0 and 4, plus spinning ----------------
+  // CORRECT = the disc stays centred in its box between frames 0 and 4.
+  label('enemies — frame 0 / frame 4 / animated+spinning (must not wobble)', 10, 300);
+  SpriteKit.ENEMY_SPRITES.forEach((e, i) => {
+    const x = 45 + (i % 5) * 95, y = 340 + Math.floor(i / 5) * 190;
+    const w = 70;
+    [0, 4].forEach((f, k) => {
+      ctx.save();
+      ctx.translate(x + k * 32, y);
+      SpriteKit.drawEnemy(ctx, e.atlas, e.row, f, w * 0.5);
+      ctx.restore();
+    });
+    // Animated + spinning, with its hit circle drawn on.
+    ctx.save();
+    ctx.translate(x + 16, y + 70);
+    const spun = ctx;
+    spun.save();
+    spun.rotate((t / 1000) * e.spin * (Math.PI / 180));
+    SpriteKit.drawEnemy(spun, e.atlas, e.row,
+                        SpriteKit.enemyFrame(t, e.frameMs), w * 0.7);
+    spun.restore();
+    ctx.strokeStyle = 'rgba(120,255,180,0.5)';
+    ctx.beginPath();
+    ctx.arc(0, 0, SpriteKit.enemyHitRadius(w * 0.7, e.disc), 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
+    label(e.name + (e.disc ? ' d' + e.disc : ''), x - 10, y + 120);
+  });
+
+  // ---- Asteroids: spinning, with hit circles -----------------------------
+  label('asteroids', 520, 300);
+  SpriteKit.ASTEROID_SPRITES.forEach((a, i) => {
+    const x = 560 + i * 90, y = 350;
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(t / 1400 + i);
+    SpriteKit.drawAsteroid(ctx, a.row, SpriteKit.asteroidFrame(t, 120), 64);
+    ctx.restore();
+    ctx.strokeStyle = 'rgba(120,255,180,0.5)';
+    ctx.beginPath();
+    ctx.arc(x, y, SpriteKit.asteroidHitRadius(64), 0, Math.PI * 2);
+    ctx.stroke();
+    label(a.key, x - 14, y + 46);
+  });
+
+  // ---- Bursts: untinted (own row) vs every WRECK_PALETTE tint ------------
+  // CORRECT = a tinted burst keeps its internal shading, not a flat silhouette.
+  label('bursts — untinted, then each WRECK_PALETTE tint (shading must survive)', 520, 440);
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  ctx.save();
+  ctx.translate(560, 500);
+  SpriteKit.drawBurst(ctx, 'aliens', 3, SpriteKit.BOOM_FRAME, 70, null);
+  ctx.restore();
+  SpriteKit.WRECK_PALETTE.forEach((p, i) => {
+    ctx.save();
+    ctx.translate(640 + (i % 5) * 70, 500 + Math.floor(i / 5) * 70);
+    SpriteKit.drawBurst(ctx, 'aliens', p.row, SpriteKit.BOOM_FRAME, 60,
+                        `rgb(${p.color})`);
+    ctx.restore();
+  });
+  ctx.restore();
+
+  // ---- Placeholders: what a failed atlas leaves --------------------------
+  label('placeholders (failed-atlas fallbacks)', 520, 630);
+  ctx.save(); ctx.translate(560, 670); SpriteKit.drawShipPlaceholder(ctx, 30); ctx.restore();
+  ctx.save(); ctx.translate(620, 670); SpriteKit.drawEnemyPlaceholder(ctx, 40); ctx.restore();
+  ctx.save(); ctx.translate(680, 650); SpriteKit.drawBulletPlaceholder(ctx, 24); ctx.restore();
+  ctx.save(); ctx.translate(740, 670);
+  SpriteKit.drawAsteroidPlaceholder(ctx, 50,
+    SpriteKit.ASTEROID_SPRITES[1].color, SpriteKit.ASTEROID_SPRITES[1].spark);
+  ctx.restore();
+
+  requestAnimationFrame(frame);
+}
+</script>
+</body>
+</html>
