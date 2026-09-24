@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
+  <title>Planet Defense</title>
+  <link rel="stylesheet" href="css/styles.css" />
+</head>
+<body>
+  <!-- Fixed logical resolution 360x640 (9:16); CSS scales the element and
+       resizeCanvas() in game.js rebuilds the backing store at device pixels. -->
+  <canvas id="game" width="360" height="640"></canvas>
+
+  <!-- Load order: constants -> sprite kit -> data -> pure logic (weapons,
+       shipyard, ships, healer, enemies, shooters, meteors, spawner, collide,
+       explosions) -> presentation (ambiance, planet, render, buildui, menu)
+       -> subsystems (audio, scores) -> game. -->
+  <script src="js/constants.js"></script>
+  <script src="js/spaceships_sprites.js"></script>
+  <script src="js/data.js"></script>
+  <script src="js/weapons.js"></script>
+  <script src="js/shipyard.js"></script>
+  <script src="js/ships.js"></script>
+  <script src="js/healer.js"></script>
+  <script src="js/enemies.js"></script>
+  <script src="js/shooters.js"></script>
+  <script src="js/meteors.js"></script>
+  <script src="js/spawner.js"></script>
+  <script src="js/collide.js"></script>
+  <script src="js/explosions.js"></script>
+  <script src="js/ambiance.js"></script>
+  <script src="js/planet.js"></script>
+  <script src="js/render.js"></script>
+  <script src="js/buildui.js"></script>
+  <script src="js/menu.js"></script>
+  <script src="js/audio.js"></script>
+  <script src="js/scores.js"></script>
+  <script src="js/game.js"></script>
+</body>
+</html>

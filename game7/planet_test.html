@@ -1,0 +1,1311 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Planet test</title>
+<!--
+  Standalone look-development page for Planet Defense (game7) — NOT part of the game.
+  Everything planet-related is procedural, under the same constraints as the game
+  (CLAUDE.md §1): no getImageData, no fetches, runs from file://. Pixel layers are
+  written into offscreen canvases with putImageData (write-only, nothing is ever read
+  back) and composited each frame with a handful of drawImage calls.
+
+  Two kinds of layer:
+    * sun-independent — ground albedo, cloud shapes, and per-pixel normals/profiles —
+      generated once per resize or setting change;
+    * sun-dependent — day/night shade, city lights, atmosphere — rebuilt by relight()
+      from those cached normals whenever the sun moves, cheaply enough to run every
+      frame, which is what lets the sun orbit.
+
+  Only the ships, aliens, meteors and shots are sprites (the real game7 atlases).
+-->
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { min-height: 100%; background: #05070d; color: #c9d6ea;
+    font: 12px system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  .wrap { display: flex; gap: 14px; padding: 12px; justify-content: center; align-items: flex-start; }
+  #game { height: min(calc(100vh - 24px), 960px); aspect-ratio: 9 / 16; display: block;
+    touch-action: none; border-radius: 4px; box-shadow: 0 0 0 1px rgba(150,180,220,0.14);
+    cursor: crosshair; }
+  #ui { width: 266px; max-height: calc(100vh - 24px); overflow-y: auto; padding-right: 6px; }
+  h1 { font-size: 14px; color: #e6eef8; margin-bottom: 3px; }
+  .hint { color: #7d90ad; margin-bottom: 10px; line-height: 1.45; }
+  .grp { border-top: 1px solid rgba(150,180,220,0.14); padding: 9px 0 5px; }
+  .grp > .t { color: #8aa0bd; font-size: 10.5px; text-transform: uppercase; letter-spacing: .07em; margin-bottom: 7px; }
+  .seg { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 7px; }
+  .seg button, .btn { flex: 1 1 auto; background: rgba(255,255,255,0.045);
+    border: 1px solid rgba(150,180,220,0.30); color: #c9d6ea; border-radius: 7px;
+    padding: 5px 7px; font: inherit; cursor: pointer; transition: background 120ms, border-color 120ms; }
+  .seg button:hover, .btn:hover { background: rgba(255,255,255,0.09); border-color: rgba(150,180,220,0.55); }
+  .seg button.on { background: rgba(127,212,255,0.16); border-color: rgba(127,212,255,0.7); color: #e6eef8; }
+  .row { margin-bottom: 8px; }
+  .row label { display: flex; justify-content: space-between; margin-bottom: 2px; }
+  .row label span:last-child { color: #7d90ad; font-variant-numeric: tabular-nums; }
+  input[type=range] { width: 100%; accent-color: #7fd4ff; }
+  .chk { display: flex; align-items: center; gap: 7px; margin-bottom: 6px; cursor: pointer; }
+  .chk input { accent-color: #7fd4ff; }
+  .btns { display: flex; gap: 6px; margin-bottom: 6px; }
+  #status { color: #7d90ad; font-size: 11px; line-height: 1.45; margin: 4px 0 10px; }
+  @media (max-width: 700px) {
+    .wrap { flex-direction: column; align-items: center; }
+    #game { height: auto; width: min(calc(100vw - 24px), 540px); }
+    #ui { width: min(calc(100vw - 24px), 540px); max-height: none; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <canvas id="game" width="360" height="640"></canvas>
+
+  <div id="ui">
+    <h1>Planet test</h1>
+    <div class="hint">Look-development page, not part of the game. The planet is 100% code; the
+      ships, aliens, meteors and shots are the real game7 sprites. <b>Click the planet</b> to hit it.</div>
+
+    <div class="grp"><div class="t">Look</div>
+      <div class="seg" data-key="style"><button data-v="soft">Soft / painted</button><button data-v="cel">Cel-shaded</button></div>
+      <div class="seg" data-key="palette"><button data-v="terran">Terran</button><button data-v="desert">Desert</button><button data-v="glacier">Glacier</button><button data-v="alien">Alien</button></div>
+      <div class="btns"><button class="btn" id="newSeed">New planet</button></div>
+    </div>
+
+    <div class="grp"><div class="t">Layout</div>
+      <div class="row" data-key="horizon"></div>
+      <div class="row" data-key="radius"></div>
+    </div>
+
+    <div class="grp"><div class="t">Sun</div>
+      <label class="chk"><input type="checkbox" data-key="sunOrbit"> Sun orbits (one turn per minute)</label>
+      <div class="row" data-key="sunAngle"></div>
+      <div class="row" data-key="sunZ"></div>
+    </div>
+
+    <div class="grp"><div class="t">Atmosphere</div>
+      <div class="row" data-key="thick"></div>
+      <div class="row" data-key="atmo"></div>
+    </div>
+
+    <div class="grp"><div class="t">Clouds</div>
+      <label class="chk"><input type="checkbox" data-key="clouds"> Clouds</label>
+      <div class="row" data-key="cover"></div>
+      <div class="row" data-key="cloudSpeed"></div>
+    </div>
+
+    <div class="grp"><div class="t">Damage</div>
+      <div class="row" data-key="hp"></div>
+      <div class="btns"><button class="btn" id="hit">Hit planet</button><button class="btn" id="barrage">Barrage</button></div>
+    </div>
+
+    <div class="grp"><div class="t">Sprite sizes</div>
+      <div class="row" data-key="shipScale"></div>
+      <div class="row" data-key="enemyScale"></div>
+      <div class="row" data-key="meteorScale"></div>
+      <div class="row" data-key="shotScale"></div>
+    </div>
+
+    <div class="grp"><div class="t">Overlays</div>
+      <label class="chk"><input type="checkbox" data-key="lights"> City lights (night side)</label>
+      <label class="chk"><input type="checkbox" data-key="sprites"> Game sprites + gunfire</label>
+      <label class="chk"><input type="checkbox" data-key="zones"> Zone lines</label>
+      <label class="chk"><input type="checkbox" data-key="animate"> Animate</label>
+      <div class="seg" data-key="panel"><button data-v="glass">Panel: glass</button><button data-v="solid">solid</button><button data-v="off">off</button></div>
+    </div>
+
+    <div id="status">…</div>
+  </div>
+</div>
+
+<!-- The real sprite kit + atlases, only to judge style fit. If they fail to load the
+     planet still works; the sprites just don't draw. -->
+<script src="js/spaceships_sprites.js"></script>
+<script>
+'use strict';
+
+// ============================================================================
+// Setup
+// ============================================================================
+const CANVAS_W = 360, CANVAS_H = 640, MAX_DPR = 2;
+const DEG = Math.PI / 180, TAU = Math.PI * 2;
+const CX = CANVAS_W / 2;
+const PANEL_H = 112;                   // mock build panel height, logical px
+const SPRITE_BASE = 'assets/sprites/';
+const STATIC = 1, CLOUDS = 2, BOTH = 3;
+const SUN_ORBIT_MS = 60000;            // one full turn of the sun, -180° -> 180° then wrap
+
+// Base display sizes at scale 1 (CLAUDE.md §9); the size sliders multiply these.
+const HULL_W = [26, 30, 30];           // Interceptor, Warhammer, Tahyon
+const ENEMY_BASE = 0.7;                // an alien's base width = its SpriteKit (game6) dispW x this
+const METEOR_W = 54;                   // the normal (medium) meteor
+const METEOR_SIZE = [0.8, 1, 1.2];     // small / medium / large, as a fraction of normal
+
+// The five guns, CLAUDE.md §9 numbers, for the gunfire demo.
+const GUNS = [
+  { row: 0, speed: 300, life: 600,  interval: 400, dispW: 9,  pattern: 'fan',   spread: 15 },  // Spark
+  { row: 1, speed: 240, life: 960,  interval: 500, dispW: 11, pattern: 'fan',   spread: 30 },  // Plasma
+  { row: 2, speed: 600, life: 1200, interval: 400, dispW: 8,  pattern: 'group', spacing: 4 },  // Mystic Dagger
+  { row: 3, speed: 300, life: 300,  interval: 400, dispW: 10, pattern: 'sweep', spread: 10 },  // Flame Fury
+  { row: 4, speed: 540, life: 1500, interval: 571, dispW: 10, pattern: 'fan',   spread: 10 },  // Lightning
+];
+
+const P = {
+  style: 'soft', palette: 'terran', seed: 11,
+  // Defaults are the look the designer picked on 2026-09-24 (CLAUDE.md §6, §9).
+  horizon: 560,          // y of the planet's top at screen centre
+  radius: 490,           // planet radius: 1.36x the screen width
+  sunOrbit: true,        // the sun goes round once per SUN_ORBIT_MS
+  sunAngle: 14,          // where the sun sits around the view axis; 0 = straight up
+  sunZ: -0.8,            // >0 sun in front of the planet, <0 behind it (backlit rim)
+  thick: 7.5,            // atmosphere scale height, logical px ("thin")
+  atmo: 1,               // atmosphere brightness (applied at draw time)
+  clouds: true, cover: 0.6, cloudSpeed: 0.8,   // cloud drift in degrees of arc per second
+  hp: 100,
+  shipScale: 0.65,       // x HULL_W
+  enemyScale: 0.75,      // x the alien base widths
+  meteorScale: 1,        // x METEOR_W; small/large follow METEOR_SIZE
+  shotScale: 0.8,        // x GUNS[].dispW, player and enemy shots alike
+  lights: true, sprites: true, zones: false, animate: true, panel: 'glass',
+};
+
+// Palettes. Colour stops are [position, [r,g,b]]. `sea` is the height threshold
+// between ocean and land in fbm units (roughly -0.7..0.7); landLo/landHi map land
+// height onto the land ramp.
+const PALETTES = {
+  terran: {
+    sea: 0.04, landLo: 0.04, landHi: 0.62,
+    ocean: [[0, [46, 136, 172]], [0.2, [22, 84, 136]], [1, [7, 26, 62]]],
+    land: [[0, [198, 184, 134]], [0.06, [88, 140, 66]], [0.3, [46, 100, 55]], [0.55, [112, 104, 70]],
+           [0.74, [136, 126, 116]], [0.88, [234, 240, 246]]],
+    dry: [178, 152, 98],
+    cloud: [250, 252, 255], cloudShade: [192, 208, 230], cover: 0.6,
+    atmo: [92, 172, 255], sunset: [255, 136, 76], night: [3, 6, 18], city: [255, 196, 118],
+  },
+  desert: {
+    sea: -9, landLo: -0.55, landHi: 0.55,
+    ocean: [[0, [0, 0, 0]], [1, [0, 0, 0]]],
+    land: [[0, [80, 30, 20]], [0.28, [134, 56, 32]], [0.52, [186, 94, 52]], [0.72, [216, 142, 88]],
+           [0.88, [240, 202, 158]]],
+    dry: null,
+    cloud: [248, 218, 190], cloudShade: [206, 160, 130], cover: 0.18,
+    atmo: [255, 162, 122], sunset: [140, 176, 255], night: [10, 4, 4], city: [255, 220, 170],
+  },
+  glacier: {
+    sea: 0.08, landLo: 0.08, landHi: 0.6,
+    ocean: [[0, [54, 112, 152]], [0.25, [28, 72, 112]], [1, [10, 28, 54]]],
+    land: [[0, [150, 186, 210]], [0.2, [186, 214, 232]], [0.5, [220, 236, 248]], [0.8, [248, 252, 255]]],
+    dry: null,
+    cloud: [242, 248, 255], cloudShade: [188, 212, 236], cover: 0.55,
+    atmo: [140, 226, 255], sunset: [255, 160, 208], night: [4, 10, 22], city: [180, 230, 255],
+  },
+  alien: {
+    sea: -0.04, landLo: -0.04, landHi: 0.6,
+    ocean: [[0, [124, 50, 164]], [0.25, [72, 24, 112]], [1, [24, 8, 44]]],
+    land: [[0, [46, 172, 142]], [0.2, [30, 120, 104]], [0.5, [112, 186, 90]], [0.78, [202, 228, 122]]],
+    dry: [156, 92, 172],
+    cloud: [234, 216, 255], cloudShade: [168, 148, 210], cover: 0.45,
+    atmo: [196, 112, 255], sunset: [110, 255, 200], night: [8, 3, 18], city: [140, 255, 220],
+  },
+};
+
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+let scale = 1;                          // backing px per logical px
+let layers = null, clouds = null;
+let T = 0, lastNow = performance.now(), cloudAngle = 0;
+const impacts = [];
+// A top-level `const` in a classic script is global but NOT a window property.
+const SK = typeof SpriteKit !== 'undefined' ? SpriteKit : null;
+
+// ============================================================================
+// Noise — seeded simplex 2D/3D (Gustavson), plus band-limited fBm
+// ============================================================================
+function mulberry32(a) {
+  return function () {
+    a |= 0; a = (a + 0x6D2B79F5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+const GRAD3 = new Float64Array([1,1,0, -1,1,0, 1,-1,0, -1,-1,0, 1,0,1, -1,0,1,
+                                1,0,-1, -1,0,-1, 0,1,1, 0,-1,1, 0,1,-1, 0,-1,-1]);
+const perm = new Uint8Array(512), perm12 = new Uint8Array(512);
+function seedNoise(seed) {
+  const r = mulberry32(seed * 7919 + 17), p = new Uint8Array(256);
+  for (let i = 0; i < 256; i++) p[i] = i;
+  for (let i = 255; i > 0; i--) { const j = Math.floor(r() * (i + 1)); const t = p[i]; p[i] = p[j]; p[j] = t; }
+  for (let i = 0; i < 512; i++) { perm[i] = p[i & 255]; perm12[i] = perm[i] % 12; }
+}
+const F2 = 0.5 * (Math.sqrt(3) - 1), G2 = (3 - Math.sqrt(3)) / 6;
+function noise2(xin, yin) {
+  const s = (xin + yin) * F2, i = Math.floor(xin + s), j = Math.floor(yin + s);
+  const t = (i + j) * G2, x0 = xin - (i - t), y0 = yin - (j - t);
+  const i1 = x0 > y0 ? 1 : 0, j1 = 1 - i1;
+  const x1 = x0 - i1 + G2, y1 = y0 - j1 + G2, x2 = x0 - 1 + 2 * G2, y2 = y0 - 1 + 2 * G2;
+  const ii = i & 255, jj = j & 255;
+  let n = 0, tt, g;
+  tt = 0.5 - x0 * x0 - y0 * y0;
+  if (tt > 0) { g = perm12[ii + perm[jj]] * 3; tt *= tt; n += tt * tt * (GRAD3[g] * x0 + GRAD3[g + 1] * y0); }
+  tt = 0.5 - x1 * x1 - y1 * y1;
+  if (tt > 0) { g = perm12[ii + i1 + perm[jj + j1]] * 3; tt *= tt; n += tt * tt * (GRAD3[g] * x1 + GRAD3[g + 1] * y1); }
+  tt = 0.5 - x2 * x2 - y2 * y2;
+  if (tt > 0) { g = perm12[ii + 1 + perm[jj + 1]] * 3; tt *= tt; n += tt * tt * (GRAD3[g] * x2 + GRAD3[g + 1] * y2); }
+  return 70 * n;
+}
+function noise3(xin, yin, zin) {
+  const s = (xin + yin + zin) / 3;
+  const i = Math.floor(xin + s), j = Math.floor(yin + s), k = Math.floor(zin + s);
+  const t = (i + j + k) / 6;
+  const x0 = xin - (i - t), y0 = yin - (j - t), z0 = zin - (k - t);
+  let i1, j1, k1, i2, j2, k2;
+  if (x0 >= y0) {
+    if (y0 >= z0)      { i1 = 1; j1 = 0; k1 = 0; i2 = 1; j2 = 1; k2 = 0; }
+    else if (x0 >= z0) { i1 = 1; j1 = 0; k1 = 0; i2 = 1; j2 = 0; k2 = 1; }
+    else               { i1 = 0; j1 = 0; k1 = 1; i2 = 1; j2 = 0; k2 = 1; }
+  } else {
+    if (y0 < z0)       { i1 = 0; j1 = 0; k1 = 1; i2 = 0; j2 = 1; k2 = 1; }
+    else if (x0 < z0)  { i1 = 0; j1 = 1; k1 = 0; i2 = 0; j2 = 1; k2 = 1; }
+    else               { i1 = 0; j1 = 1; k1 = 0; i2 = 1; j2 = 1; k2 = 0; }
+  }
+  const G3 = 1 / 6;
+  const x1 = x0 - i1 + G3, y1 = y0 - j1 + G3, z1 = z0 - k1 + G3;
+  const x2 = x0 - i2 + 2 * G3, y2 = y0 - j2 + 2 * G3, z2 = z0 - k2 + 2 * G3;
+  const x3 = x0 - 1 + 3 * G3, y3 = y0 - 1 + 3 * G3, z3 = z0 - 1 + 3 * G3;
+  const ii = i & 255, jj = j & 255, kk = k & 255;
+  let n = 0, tt, g;
+  tt = 0.6 - x0 * x0 - y0 * y0 - z0 * z0;
+  if (tt > 0) { g = perm12[ii + perm[jj + perm[kk]]] * 3; tt *= tt; n += tt * tt * (GRAD3[g] * x0 + GRAD3[g + 1] * y0 + GRAD3[g + 2] * z0); }
+  tt = 0.6 - x1 * x1 - y1 * y1 - z1 * z1;
+  if (tt > 0) { g = perm12[ii + i1 + perm[jj + j1 + perm[kk + k1]]] * 3; tt *= tt; n += tt * tt * (GRAD3[g] * x1 + GRAD3[g + 1] * y1 + GRAD3[g + 2] * z1); }
+  tt = 0.6 - x2 * x2 - y2 * y2 - z2 * z2;
+  if (tt > 0) { g = perm12[ii + i2 + perm[jj + j2 + perm[kk + k2]]] * 3; tt *= tt; n += tt * tt * (GRAD3[g] * x2 + GRAD3[g + 1] * y2 + GRAD3[g + 2] * z2); }
+  tt = 0.6 - x3 * x3 - y3 * y3 - z3 * z3;
+  if (tt > 0) { g = perm12[ii + 1 + perm[jj + 1 + perm[kk + 1]]] * 3; tt *= tt; n += tt * tt * (GRAD3[g] * x3 + GRAD3[g + 1] * y3 + GRAD3[g + 2] * z3); }
+  return 32 * n;
+}
+
+// fBm that drops octaves the pixel can't resolve. `lod` is how many noise units
+// one device pixel spans at octave 0. Near the limb the surface is foreshortened
+// hard, so without this the horizon would sparkle with sub-pixel detail.
+const FBM_NORM = [1, 0.5, 0.75, 0.875, 0.9375, 0.96875, 0.984375, 0.9921875];
+function fbm2(x, y, oct, lod) {
+  let sum = 0, amp = 0.5, fr = 1;
+  for (let o = 0; o < oct; o++) {
+    const c = lod * fr;
+    if (c >= 0.5) break;
+    sum += amp * (c <= 0.25 ? 1 : (0.5 - c) * 4) * noise2(x * fr + o * 31.7, y * fr - o * 17.3);
+    amp *= 0.5; fr *= 2.02;
+  }
+  return sum / FBM_NORM[oct];
+}
+function fbm3(x, y, z, oct, lod) {
+  let sum = 0, amp = 0.5, fr = 1;
+  for (let o = 0; o < oct; o++) {
+    const c = lod * fr;
+    if (c >= 0.5) break;
+    sum += amp * (c <= 0.25 ? 1 : (0.5 - c) * 4) * noise3(x * fr + o * 31.7, y * fr - o * 17.3, z * fr + o * 11.1);
+    amp *= 0.5; fr *= 2.02;
+  }
+  return sum / FBM_NORM[oct];
+}
+
+// Terrain height at surface coords (u, v). `f` is the foreshortening there and
+// `kk` the device px per logical px, which together set how much detail survives.
+// One function for the ground pixels AND the city-light test, so a light can
+// never land on water the ground shows.
+const T_S = 110, T_SW = 170, T_WA = 46;   // continent scale, warp scale, warp px
+function terrainH(u, v, f, kk) {
+  const lodW = f / (kk * T_SW);
+  const wu = fbm2(u / T_SW + 17.3, v / T_SW - 4.1, 3, lodW);
+  const wv = fbm2(u / T_SW - 9.7, v / T_SW + 23.9, 3, lodW);
+  return fbm2((u + wu * T_WA) / T_S, (v + wv * T_WA) / T_S, 6, f / (kk * T_S));
+}
+function cityRegion(u, v) { return noise2(u / 30 + 300.5, v / 30 - 41.2); }
+
+// ============================================================================
+// Small helpers
+// ============================================================================
+function clamp(x, a, b) { return x < a ? a : x > b ? b : x; }
+function ss(e0, e1, x) { let t = (x - e0) / (e1 - e0); t = t < 0 ? 0 : t > 1 ? 1 : t; return t * t * (3 - 2 * t); }
+function ramp(stops, t, out) {
+  if (t <= stops[0][0]) { const c = stops[0][1]; out[0] = c[0]; out[1] = c[1]; out[2] = c[2]; return; }
+  for (let i = 0; i < stops.length - 1; i++) {
+    const a = stops[i], b = stops[i + 1];
+    if (t < b[0]) {
+      const f = (t - a[0]) / (b[0] - a[0]);
+      out[0] = a[1][0] + (b[1][0] - a[1][0]) * f;
+      out[1] = a[1][1] + (b[1][1] - a[1][1]) * f;
+      out[2] = a[1][2] + (b[1][2] - a[1][2]) * f;
+      return;
+    }
+  }
+  const c = stops[stops.length - 1][1]; out[0] = c[0]; out[1] = c[1]; out[2] = c[2];
+}
+// Cel: flat colour per band, no interpolation.
+function band(stops, t, out) {
+  let c = stops[0][1];
+  for (let i = 1; i < stops.length; i++) if (t >= stops[i][0]) c = stops[i][1];
+  out[0] = c[0]; out[1] = c[1]; out[2] = c[2];
+}
+function mixInto(out, c, f) {
+  out[0] += (c[0] - out[0]) * f; out[1] += (c[1] - out[1]) * f; out[2] += (c[2] - out[2]) * f;
+}
+function sunVector() {
+  const a = P.sunAngle * DEG, z = P.sunZ, c = Math.sqrt(1 - z * z);
+  return { x: Math.sin(a) * c, y: -Math.cos(a) * c, z };
+}
+function toCanvas(img) {
+  const c = document.createElement('canvas');
+  c.width = img.width; c.height = img.height;
+  c.getContext('2d').putImageData(img, 0, 0);
+  return c;
+}
+function blankCanvas(w, h) {
+  const c = document.createElement('canvas');
+  c.width = w; c.height = h;
+  return c;
+}
+const rgba = (c, a) => `rgba(${c[0] | 0},${c[1] | 0},${c[2] | 0},${a.toFixed(3)})`;
+
+// ============================================================================
+// Static planet layers. Screen-aligned, device pixels, over the planet's part of
+// the screen only. Geometry: the planet is a disc seen face-on and we only see
+// its top cap, i.e. its LIMB. Surface coordinates come from a polar mapping —
+//   u = theta * rho          (distance along the arc)
+//   v = R * acos(rho / R)    (true surface distance in from the limb)
+// — which bends every feature along the curve and foreshortens it toward the
+// horizon, which is what makes a flat band read as a globe.
+//
+// Nothing here depends on the sun. What the sun pass needs per pixel (normal,
+// limb normal, coverage, atmosphere profiles, relief slope, city glow) is cached
+// in typed arrays so relight() is plain arithmetic.
+// ============================================================================
+const RELIEF = 34;                     // relief shading strength per unit slope
+function buildStatic(q) {
+  const pal = PALETTES[P.palette], cel = P.style === 'cel';
+  const kk = scale * q;
+  const R = P.radius, cy = P.horizon + R;
+  const thick = P.thick;
+  const halo = Math.min(120, thick * 11 + 10);
+  const y0 = Math.max(0, P.horizon - halo);
+  const W = Math.ceil(CANVAS_W * kk), H = Math.ceil((CANVAS_H - y0) * kk), N = W * H;
+  const gImg = new ImageData(W, H), gd = gImg.data;
+  const sImg = new ImageData(W, H), lImg = new ImageData(W, H), aImg = new ImageData(W, H);
+  const sd = sImg.data, ld = lImg.data;
+  const hb = new Float32Array(N).fill(-99);          // terrain height; -99 = not planet
+  const kmap = new Int32Array(N).fill(-1);           // pixel -> active index
+  const A = {
+    n: 0, idx: new Int32Array(N),
+    nx: new Float32Array(N), ny: new Float32Array(N), nz: new Float32Array(N),
+    lx: new Float32Array(N), ly: new Float32Array(N),
+    flag: new Uint8Array(N),                         // 0 air above the limb, 1 land, 3 sea
+    cover: new Float32Array(N),
+    line: new Float32Array(N), halo: new Float32Array(N), haze: new Float32Array(N),
+    rgx: new Float32Array(N), rgy: new Float32Array(N), city: new Float32Array(N),
+  };
+  const aa = 0.6 / kk;                               // antialias half-width, logical px
+  const C = [0, 0, 0], O = [0, 0, 0];
+
+  // Colours that never change per pixel: shade is always night-tinted black and
+  // lights always city-coloured; relight() only writes their alpha.
+  for (let o = 0; o < N * 4; o += 4) {
+    sd[o] = pal.night[0]; sd[o + 1] = pal.night[1]; sd[o + 2] = pal.night[2];
+    ld[o] = pal.city[0]; ld[o + 1] = pal.city[1]; ld[o + 2] = pal.city[2];
+  }
+
+  for (let j = 0; j < H; j++) {
+    const y = y0 + (j + 0.5) / kk, dy = y - cy;
+    for (let i = 0; i < W; i++) {
+      const x = (i + 0.5) / kk, dx = x - CX;
+      const rho = Math.sqrt(dx * dx + dy * dy);
+      const hOut = rho - R;
+      if (hOut > halo) continue;
+      const idx = j * W + i, o = idx * 4, k = A.n++;
+      kmap[idx] = k;
+      A.idx[k] = idx;
+      A.lx[k] = dx / rho; A.ly[k] = dy / rho;
+
+      // The limb line: a thin bright seam right on the edge of the disc.
+      const lq = (hOut + 0.15) / 0.8;
+      A.line[k] = cel ? ss(1.25 + aa, 1.25 - aa, Math.abs(hOut + 0.1)) : Math.exp(-lq * lq);
+
+      if (hOut > 0) {
+        // Halo above the limb: a thin, dense band plus a very faint wide scatter.
+        A.halo[k] = cel
+          ? 0.34 * ss(thick * 0.55 + aa, thick * 0.55 - aa, hOut)
+            + 0.2 * ss(thick * 1.15 + aa, thick * 1.15 - aa, hOut)
+            + 0.12 * ss(thick * 2.1 + aa, thick * 2.1 - aa, hOut)
+          : 0.8 * Math.exp(-hOut / thick) + 0.2 * Math.exp(-hOut / (thick * 3.2));
+        continue;
+      }
+
+      // ---- The planet itself --------------------------------------------------
+      const cover = clamp((R - rho) * kk + 0.5, 0, 1);
+      const nx = dx / R, ny = dy / R;
+      const nz = Math.sqrt(Math.max(0, 1 - nx * nx - ny * ny));
+      const theta = Math.atan2(dx, -dy);
+      const u = theta * rho, v = R * Math.acos(Math.min(1, rho / R));
+      const f = 1 / Math.max(nz, 0.03);              // foreshortening across the arc
+      const h = terrainH(u, v, f, kk);
+      const land = h > pal.sea;
+      hb[idx] = h;
+      A.flag[k] = land ? 1 : 3;
+      A.nx[k] = nx; A.ny[k] = ny; A.nz[k] = nz; A.cover[k] = cover;
+
+      // Albedo
+      if (land) {
+        const t = (h - pal.landLo) / (pal.landHi - pal.landLo);
+        (cel ? band : ramp)(pal.land, t, C);
+        if (pal.dry && t < 0.42) {
+          const m = noise2(u / 240 + 51.7, v / 240 - 13.3);
+          let w = ss(0.1, 0.42, m) * (1 - t / 0.42);
+          if (cel) w = w > 0.45 ? 1 : 0;
+          mixInto(C, pal.dry, w);
+        }
+        if (!cel && h - pal.sea < 0.006) {            // soft coastline, no stair-steps
+          ramp(pal.ocean, 0, O);
+          mixInto(C, O, 1 - (h - pal.sea) / 0.006);
+        }
+      } else {
+        const t = (pal.sea - h) / 0.5;
+        if (cel) band(pal.ocean, t < 0.16 ? 0 : t < 0.5 ? 0.2 : 1, C);
+        else ramp(pal.ocean, t, C);
+      }
+      // Aerial perspective: near the limb the ground is seen through more air.
+      const fres = 1 - nz;
+      if (!cel) {
+        const hz = fres * fres * fres * 0.55;
+        C[0] += (pal.atmo[0] * 0.55 - C[0]) * hz;
+        C[1] += (pal.atmo[1] * 0.55 - C[1]) * hz;
+        C[2] += (pal.atmo[2] * 0.55 - C[2]) * hz;
+      }
+      gd[o] = C[0]; gd[o + 1] = C[1]; gd[o + 2] = C[2]; gd[o + 3] = 255 * cover;
+
+      // Haze inside the limb (its brightness is the sun's business, in relight)
+      const d = -hOut;
+      A.haze[k] = cel
+        ? 0.36 * ss(thick * 0.9 + aa, thick * 0.9 - aa, d) + 0.16 * ss(thick * 2.4 + aa, thick * 2.4 - aa, d)
+        : fres * fres * fres * 0.55;
+
+      // Faint sodium glow over whole cities; the individual lights are points (below).
+      if (land) {
+        const region = ss(0.1, 0.5, cityRegion(u, v));
+        const fadeG = clamp((0.45 - f / (kk * 30)) / 0.2, 0, 1);
+        A.city[k] = (cel ? (region > 0.55 ? 0.12 : 0) : region * region * 0.16) * fadeG;
+      }
+    }
+  }
+
+  // ---- Second pass: relief slopes and (cel) coastline outlines -----------------
+  // Reads only our own height buffer — never pixels back from a canvas.
+  const OL = Math.max(1, Math.round(kk * 0.7));
+  for (let j = 1; j < H - 1; j++) {
+    for (let i = 1; i < W - 1; i++) {
+      const idx = j * W + i, h = hb[idx];
+      if (h <= pal.sea) continue;                    // sea, or not planet at all
+      const hl2 = hb[idx - 1], hr = hb[idx + 1], hu = hb[idx - W], hd = hb[idx + W];
+      if (hl2 < -90 || hr < -90 || hu < -90 || hd < -90) continue;
+      const k = kmap[idx], nz = A.nz[k];
+      A.rgx[k] = (hr - hl2) * kk * 0.5 * RELIEF * nz;
+      A.rgy[k] = (hd - hu) * kk * 0.5 * RELIEF * nz;
+      if (cel && pal.sea > -5) {
+        const a = hb[idx - OL] ?? -99, b = hb[idx + OL] ?? -99;
+        const c = hb[idx - OL * W] ?? -99, e = hb[idx + OL * W] ?? -99;
+        const coast = (a > -90 && a <= pal.sea) || (b > -90 && b <= pal.sea)
+                   || (c > -90 && c <= pal.sea) || (e > -90 && e <= pal.sea);
+        if (coast) { const o = idx * 4; gd[o] *= 0.45; gd[o + 1] *= 0.45; gd[o + 2] *= 0.5; }
+      }
+    }
+  }
+
+  // ---- City lights as POINTS on the sphere --------------------------------------
+  // Sampled on a jittered grid in surface coordinates, then projected. A point
+  // stays one pixel wide however hard the limb foreshortens, so unlike noise-
+  // based lights these survive all the way up to the horizon. Screen density
+  // climbs as 1/nz toward the limb, so acceptance is thinned by nz to keep the
+  // horizon from fusing into a solid line of light.
+  const cities = [];
+  const rhoMin = cy - CANVAS_H;
+  const vMax = R * Math.acos(clamp(rhoMin / R, -1, 1));
+  const thetaVis = Math.max(Math.asin(Math.min(1, CX / R)), Math.atan2(CX, rhoMin)) + DEG;
+  const STEP = 2.6;                                  // surface px between candidates
+  const rc = mulberry32(P.seed * 97 + 3);
+  for (let v = 0.4; v < vMax; v += STEP) {
+    const dth = STEP / (R * Math.cos(v / R));
+    for (let th = -thetaVis; th < thetaVis; th += dth) {
+      const vj = v + (rc() - 0.5) * STEP, tj = th + (rc() - 0.5) * dth;
+      const rho = R * Math.cos(vj / R), u = tj * rho;
+      const c1 = cityRegion(u, vj);
+      if (c1 < 0.12) continue;
+      const nz = Math.sin(vj / R);
+      if (rc() > ss(0.1, 0.5, c1) * 0.75 * Math.min(1, nz * 1.6)) continue;
+      const x = CX + rho * Math.sin(tj), y = cy - rho * Math.cos(tj);
+      if (x < 0 || x >= CANVAS_W || y < y0 || y >= CANVAS_H) continue;
+      if (terrainH(u, vj, 1 / Math.max(nz, 0.03), kk) <= pal.sea) continue;
+      cities.push({
+        i: Math.floor(x * kk), j: Math.floor((y - y0) * kk),
+        nx: (x - CX) / R, ny: (y - cy) / R, nz, b: 0.45 + 0.55 * rc(),
+      });
+    }
+  }
+
+  // ---- Fire spots for the damage test: land points in the visible band ---------
+  const fires = [];
+  const rnd = mulberry32(P.seed * 31 + 5);
+  const panelTop = CANVAS_H - PANEL_H - 4;
+  for (let tries = 0; tries < 6000 && fires.length < 10; tries++) {
+    const x = 8 + rnd() * (CANVAS_W - 16), y = y0 + rnd() * (CANVAS_H - y0);
+    const dx = x - CX, dy = y - cy, rho = Math.hypot(dx, dy), depth = R - rho;
+    if (depth < 4 || depth > 70 || (P.panel === 'solid' && y > panelTop)) continue;
+    const idx = Math.floor((y - y0) * kk) * W + Math.floor(x * kk);
+    if (!(hb[idx] > pal.sea)) continue;
+    if (fires.some((f) => Math.hypot(f.x - x, f.y - y) < 20)) continue;
+    fires.push({ x, y, nx: dx / rho, ny: dy / rho });
+  }
+
+  const shade = blankCanvas(W, H), lights = blankCanvas(W, H), atmo = blankCanvas(W, H);
+  return {
+    y0, W, H, kk, fires, cities, px: A, sImg, lImg, aImg,
+    ground: toCanvas(gImg), shade, lights, atmo,
+    sctx: shade.getContext('2d'), lctx: lights.getContext('2d'), actx: atmo.getContext('2d'),
+    litKey: '', litMs: 0,
+  };
+}
+
+// ============================================================================
+// Sun pass: day/night shade, city lights and atmosphere from the cached normals.
+// Plain arithmetic over the active pixels plus three putImageData calls, so it
+// can run every frame while the sun moves.
+// ============================================================================
+function relight(Lr) {
+  const t0 = performance.now();
+  const pal = PALETTES[P.palette], cel = P.style === 'cel';
+  const L = sunVector(), Lx = L.x, Ly = L.y, Lz = L.z;
+  const hl = Math.hypot(Lx, Ly, Lz + 1);
+  const Hx = Lx / hl, Hy = Ly / hl, Hz = (Lz + 1) / hl;   // half vector for sea glint
+  const backlit = Math.max(0, -Lz);
+  const A = Lr.px, sd = Lr.sImg.data, ld = Lr.lImg.data, ad = Lr.aImg.data;
+  const at = pal.atmo, su = pal.sunset;
+  const w = 0.014;                                   // cel band antialias, in Lambert units
+
+  for (let k = 0, n = A.n; k < n; k++) {
+    const o = A.idx[k] * 4;
+    const limbLam = A.lx[k] * Lx + A.ly[k] * Ly;     // how lit the limb is at this angle
+    const Ilimb = 0.12 + 0.88 * ss(-0.5, 0.65, limbLam) + backlit * 0.45;
+    // The rim turns sunset-coloured where the terminator meets the limb.
+    const qL = limbLam / 0.22;
+    const sL = qL * qL > 9 ? 0 : Math.exp(-qL * qL) * 0.8;
+    const cr = at[0] + (su[0] - at[0]) * sL, cg = at[1] + (su[1] - at[1]) * sL, cb = at[2] + (su[2] - at[2]) * sL;
+    let ar = 0, ag = 0, ab = 0;                     // additive light, 0..255 scale
+
+    const li = A.line[k];
+    if (li > 0.002) {
+      // whiter than the air around it, the way a real limb peaks toward white
+      const v = li * 0.95 * Ilimb;
+      ar += v * (cr * 0.7 + 76.5); ag += v * (cg * 0.7 + 76.5); ab += v * (cb * 0.7 + 76.5);
+    }
+
+    const fl = A.flag[k];
+    if (fl === 0) {
+      const v = A.halo[k] * 0.85 * Ilimb;
+      ar += v * cr; ag += v * cg; ab += v * cb;
+      ld[o + 3] = 0;
+    } else {
+      const lam = A.nx[k] * Lx + A.ny[k] * Ly + A.nz[k] * Lz;   // Lambert term
+      const cv = A.cover[k];
+      let bright = cel
+        ? 0.13 + 0.29 * ss(-0.06 - w, -0.06 + w, lam) + 0.30 * ss(0.1 - w, 0.1 + w, lam)
+          + 0.28 * ss(0.34 - w, 0.34 + w, lam)
+        : 0.06 + 0.94 * ss(-0.16, 0.5, lam) * (0.8 + 0.2 * clamp(lam, 0, 1));
+      if (fl === 1) {
+        const rel = -(A.rgx[k] * Lx + A.rgy[k] * Ly);         // slopes facing the sun brighten
+        bright *= cel ? (rel > 0.07 ? 1.12 : rel < -0.07 ? 0.84 : 1) : clamp(1 + rel, 0.72, 1.22);
+        if (bright > 1) bright = 1;
+      }
+      sd[o + 3] = 255 * (1 - bright) * cv;
+      const cg0 = A.city[k];
+      ld[o + 3] = cg0 > 0 ? 255 * cg0 * ss(0.04, -0.14, lam) * cv : 0;
+
+      if (!cel && fl === 3 && lam > 0) {             // sun glint on open water
+        const sp = A.nx[k] * Hx + A.ny[k] * Hy + A.nz[k] * Hz;
+        if (sp > 0.9) { const g = Math.pow(sp, 90) * 0.5 * 255 * cv; ar += g; ag += g * 0.96; ab += g * 0.86; }
+      }
+      const hz = A.haze[k];
+      if (hz > 0.002) {
+        const Iin = 0.1 + 0.9 * ss(-0.25, 0.45, lam) + backlit * 0.25;
+        const qi = lam / 0.18, sIn = qi * qi > 9 ? 0 : Math.exp(-qi * qi) * 0.7;
+        const hi = hz * Iin * cv;
+        ar += hi * (at[0] + (su[0] - at[0]) * sIn);
+        ag += hi * (at[1] + (su[1] - at[1]) * sIn);
+        ab += hi * (at[2] + (su[2] - at[2]) * sIn);
+      }
+    }
+
+    const a = ar > ag ? (ar > ab ? ar : ab) : (ag > ab ? ag : ab);
+    if (a > 0.5) { ad[o] = ar / a * 255; ad[o + 1] = ag / a * 255; ad[o + 2] = ab / a * 255; ad[o + 3] = a; }
+    else ad[o + 3] = 0;
+  }
+
+  // Point lights, splatted on top of the city glow. About one logical px wide at
+  // any backing scale, plus (soft) a faint cross of bloom.
+  const W = Lr.W, H = Lr.H;
+  const s = Lr.kk < 1.6 ? 0 : Lr.kk < 2.6 ? 1 : 2;
+  const add = (i, j, v) => { if (i >= 0 && j >= 0 && i < W && j < H) { const q = (j * W + i) * 4 + 3; ld[q] = ld[q] + v; } };
+  for (const p of Lr.cities) {
+    const nf = ss(0.04, -0.14, p.nx * Lx + p.ny * Ly + p.nz * Lz);
+    if (nf < 0.01) continue;
+    const v = 255 * p.b * nf;
+    for (let dj = -s; dj <= s; dj++) for (let di = -s; di <= s; di++) add(p.i + di, p.j + dj, v);
+    if (!cel) {
+      const g = v * 0.28, r = s + 1;
+      add(p.i - r, p.j, g); add(p.i + r, p.j, g); add(p.i, p.j - r, g); add(p.i, p.j + r, g);
+    }
+  }
+
+  Lr.sctx.putImageData(Lr.sImg, 0, 0);
+  Lr.lctx.putImageData(Lr.lImg, 0, 0);
+  Lr.actx.putImageData(Lr.aImg, 0, 0);
+  Lr.litMs = performance.now() - t0;
+}
+
+// ============================================================================
+// Cloud layer. Generated once over an angular sector wider than the view, with
+// noise that is PERIODIC in angle, then drawn rotated about the planet centre
+// every frame. Rotation keeps each pixel at its radius, so the clouds stay on
+// the planet, keep their foreshortening, and wrap seamlessly — the drift costs
+// one drawImage a frame. The sun darkens them through the shade layer on top.
+// ============================================================================
+function buildClouds(q) {
+  const pal = PALETTES[P.palette], cel = P.style === 'cel';
+  const kc = (cel ? scale : Math.max(1, scale * 0.6)) * q;   // soft clouds don't need full res
+  const R = P.radius, cy = P.horizon + R;
+  const rhoMin = cy - CANVAS_H - 2;
+  const thetaVis = Math.max(Math.asin(Math.min(1, CX / R)), Math.atan2(CX, cy - CANVAS_H)) + 2 * DEG;
+  const per = 2 * thetaVis + 4 * DEG;                // wider than the view: no visible repeat
+  const phi1 = -thetaVis - per, phi2 = thetaVis;
+
+  let bx0 = 1e9, by0 = 1e9, bx1 = -1e9, by1 = -1e9;
+  for (let s = 0; s <= 128; s++) {
+    const ph = phi1 + (phi2 - phi1) * s / 128;
+    for (const r of [rhoMin, R + 1]) {
+      const x = CX + r * Math.sin(ph), y = cy - r * Math.cos(ph);
+      bx0 = Math.min(bx0, x); bx1 = Math.max(bx1, x); by0 = Math.min(by0, y); by1 = Math.max(by1, y);
+    }
+  }
+  bx0 -= 2; by0 -= 2; bx1 += 2; by1 += 2;
+  const W = Math.ceil((bx1 - bx0) * kc), H = Math.ceil((by1 - by0) * kc);
+  const img = new ImageData(W, H), d = img.data;
+  const Sc = 64;
+  const thr = 0.42 - 0.84 * P.cover;
+  const C = [0, 0, 0];
+
+  for (let j = 0; j < H; j++) {
+    const y = by0 + (j + 0.5) / kc, dy = y - cy;
+    for (let i = 0; i < W; i++) {
+      const x = bx0 + (i + 0.5) / kc, dx = x - CX;
+      const rho = Math.sqrt(dx * dx + dy * dy);
+      if (rho > R + 1 || rho < rhoMin) continue;
+      const phi = Math.atan2(dx, -dy);
+      if (phi < phi1 - 0.01 || phi > phi2 + 0.01) continue;
+      const rr = Math.min(1, rho / R), nz = Math.sqrt(1 - rr * rr), v = R * Math.acos(rr);
+      const f = 1 / Math.max(nz, 0.03);
+      const psi = TAU * phi / per, cr = per * rho / (TAU * Sc);
+      const X = cr * Math.cos(psi), Y = cr * Math.sin(psi), Z = v / Sc;
+      const lod = f / (kc * Sc);
+      const w = fbm3(X * 0.5 + 5.2, Y * 0.5 - 3.1, Z * 0.5 + 9.1, 2, lod * 0.5) * 0.5;
+      const c = fbm3(X + w, Y - w, Z + w * 0.6, 5, lod);
+      let a, t;
+      if (cel) {
+        a = 0.85 * ss(thr - 0.012, thr + 0.012, c) + 0.15 * ss(thr + 0.05, thr + 0.074, c);
+        t = ss(thr + 0.05, thr + 0.074, c);
+      } else {
+        a = ss(thr, thr + 0.34, c) * 0.94;
+        t = ss(thr, thr + 0.5, c);
+      }
+      if (a < 0.004) continue;
+      const edge = clamp((R - rho) * kc + 0.5, 0, 1);
+      C[0] = pal.cloudShade[0]; C[1] = pal.cloudShade[1]; C[2] = pal.cloudShade[2];
+      mixInto(C, pal.cloud, t);
+      const o = (j * W + i) * 4;
+      d[o] = C[0]; d[o + 1] = C[1]; d[o + 2] = C[2]; d[o + 3] = 255 * a * edge;
+    }
+  }
+
+  const cloud = toCanvas(img);
+  // Shadow: the same shapes as a dark silhouette, drawn offset away from the sun.
+  const shadow = blankCanvas(W, H);
+  const sc = shadow.getContext('2d');
+  sc.drawImage(cloud, 0, 0);
+  sc.globalCompositeOperation = 'source-in';
+  sc.fillStyle = 'rgb(0, 4, 14)';
+  sc.fillRect(0, 0, W, H);
+  return { cloud, shadow, x: bx0, y: by0, w: W / kc, h: H / kc, per, W, H };
+}
+
+// ============================================================================
+// Build scheduling — a low-res preview while a slider is dragged, full res on release
+// ============================================================================
+let previewKinds = 0, previewQueued = false, lastBuild = '';
+function build(kinds, q) {
+  const t0 = performance.now();
+  if (kinds & STATIC) layers = buildStatic(q);
+  if (kinds & CLOUDS) clouds = buildClouds(q);
+  const ms = performance.now() - t0;
+  if (q === 1) {
+    lastBuild = `generated in ${ms.toFixed(0)} ms (${kinds === BOTH ? 'all layers' : kinds === STATIC ? 'ground + air' : 'clouds'})`;
+  }
+  updateStatus();
+}
+function requestBuild(kinds, preview) {
+  if (!preview) { build(kinds, 1); return; }
+  previewKinds |= kinds;
+  if (previewQueued) return;
+  previewQueued = true;
+  requestAnimationFrame(() => { previewQueued = false; const k = previewKinds; previewKinds = 0; build(k, 0.35); });
+}
+function updateStatus() {
+  const st = document.getElementById('status');
+  const sprites = !SK ? 'sprites: kit not found' : !SK.ready ? 'sprites: loading…'
+                : SK.failed ? 'sprites: some atlases failed' : 'sprites: loaded';
+  const lit = layers ? ` · sun pass ${layers.litMs.toFixed(1)} ms` : '';
+  const pts = layers ? ` · ${layers.cities.length} city lights` : '';
+  st.textContent = `${lastBuild}${lit}${pts} · backing ${scale.toFixed(2)}× (${canvas.width}×${canvas.height}) · ${sprites}`;
+}
+
+// ============================================================================
+// Canvas sizing (game6's hybrid sharp scaling)
+// ============================================================================
+let resizeTimer = 0;
+function resizeCanvas() {
+  const dpr = Math.min(window.devicePixelRatio || 1, MAX_DPR);
+  const r = canvas.getBoundingClientRect();
+  const bw = Math.max(1, Math.round((r.width || CANVAS_W) * dpr));
+  const bh = Math.max(1, Math.round((r.height || CANVAS_H) * dpr));
+  if (canvas.width !== bw) canvas.width = bw;
+  if (canvas.height !== bh) canvas.height = bh;
+  const old = scale;
+  scale = bw / CANVAS_W;
+  return Math.abs(scale - old) / old > 0.02;
+}
+window.addEventListener('resize', () => {
+  if (resizeCanvas()) {
+    requestBuild(BOTH, true);
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(() => build(BOTH, 1), 250);
+  }
+});
+
+// ============================================================================
+// Demo scene: a few ships, aliens and meteors at the chosen sizes, firing
+// ============================================================================
+// Positions are fractions of a zone's height, so they follow the horizon.
+const SCENE_SHIPS = [
+  { row: 0, x: 62,  y: (zh, hz) => hz - zh * 0.5,  h: -8, gun: 0, level: 3 },   // Spark L3
+  { row: 1, x: 150, y: (zh, hz) => hz - zh * 0.3,  h: 4,  gun: 1, level: 2 },   // Plasma L2
+  { row: 2, x: 238, y: (zh, hz) => hz - zh * 0.62, h: -3, gun: 4, level: 2 },   // Lightning L2
+  { row: 0, x: 306, y: (zh, hz) => hz - zh * 0.34, h: 10, gun: 3, level: 3 },   // Flame Fury L3
+  { row: 2, x: 190, y: (zh) => zh * 1.6,           h: 16, gun: 2, level: 3 },   // Mystic Dagger L3
+];
+const SCENE_ALIENS = [
+  { atlas: 'aliens',   e: 2, x: 100, y: (zh) => zh * 0.8 },                      // Lancer
+  { atlas: 'aliens',   e: 0, x: 60,  y: (zh) => zh * 1.25 },                     // Sentinel
+  { atlas: 'shooters', e: 6, x: 180, y: (zh) => zh * 0.5, face: Math.PI,          // Harrier: level-1
+    gun: 1, every: 1500 },                                                        // plasma, downward
+];
+const SCENE_METEORS = [
+  { row: 0, x: 296, y: (zh) => zh * 0.38, spin: 1 / 2400 },
+  { row: 1, x: 286, y: (zh) => zh * 1.3,  spin: -1 / 3200 },
+  { row: 2, x: 110, y: (zh) => zh * 2.05, spin: 1 / 4200 },
+];
+const bob = (i, ax, ay) => [Math.sin(T / 1600 + i * 1.3) * ax, Math.cos(T / 1900 + i * 0.9) * ay];
+
+function shipPoses() {
+  const zh = P.horizon / 3;
+  return SCENE_SHIPS.map((s, i) => {
+    const [ox, oy] = bob(i, 4, 3);
+    return { s, i, x: s.x + ox, y: s.y(zh, P.horizon) + oy,
+             ang: (s.h + Math.sin(T / 1300 + i) * 4) * DEG, w: HULL_W[s.row] * P.shipScale };
+  });
+}
+function alienPoses() {
+  const zh = P.horizon / 3;
+  return SCENE_ALIENS.map((a, i) => {
+    const [ox, oy] = bob(i + 7, 5, 4);
+    const type = SK.ENEMY_SPRITES[a.e];
+    return { a, i, type, x: a.x + ox, y: a.y(zh) + oy,
+             rot: a.face !== undefined ? a.face : (T / 1000) * type.spin * DEG,
+             w: type.dispW * ENEMY_BASE * P.enemyScale };
+  });
+}
+
+const bullets = [];
+const nextShot = [];
+// One trigger pull. Level rules per CLAUDE.md §7.3: fans spread N shots, the
+// Dagger groups them side by side, Flame Fury is always one shot off a sweeping barrel.
+function volley(g, level, x, y, ang) {
+  const shots = [];
+  if (g.pattern === 'fan' && level > 1) {
+    for (let i = 0; i < level; i++) shots.push([ang + (-g.spread / 2 + g.spread * i / (level - 1)) * DEG, 0]);
+  } else if (g.pattern === 'group' && level > 1) {
+    for (let i = 0; i < level; i++) shots.push([ang, (i - (level - 1) / 2) * g.spacing]);
+  } else if (g.pattern === 'sweep') {
+    const ph = (T % 700) / 700, tri = ph < 0.5 ? ph * 4 - 1 : 3 - ph * 4;
+    shots.push([ang + tri * g.spread / 2 * DEG, 0]);
+  } else {
+    shots.push([ang, 0]);
+  }
+  for (const [a, off] of shots) {
+    bullets.push({ x: x + Math.cos(ang) * off, y: y + Math.sin(ang) * off,
+                   vx: Math.sin(a) * g.speed, vy: -Math.cos(a) * g.speed,
+                   ang: a, row: g.row, w: g.dispW, age: 0, life: g.life });
+  }
+}
+function updateBullets(dt) {
+  if (!P.sprites || !SK || !SK.ready) { bullets.length = 0; return; }
+  for (let i = bullets.length - 1; i >= 0; i--) {
+    const b = bullets[i];
+    b.age += dt;
+    if (b.age >= b.life) { bullets.splice(i, 1); continue; }
+    b.x += b.vx * dt / 1000;
+    b.y += b.vy * dt / 1000;
+  }
+  for (const p of shipPoses()) {
+    const g = GUNS[p.s.gun];
+    const interval = g.pattern === 'sweep' ? g.interval / p.s.level : g.interval;
+    if (nextShot[p.i] === undefined) nextShot[p.i] = T + Math.random() * interval;
+    while (T >= nextShot[p.i]) {
+      nextShot[p.i] += interval;
+      const nose = SK.hullHeight(p.s.row, p.w) / 2;
+      volley(g, p.s.level, p.x + Math.sin(p.ang) * nose, p.y - Math.cos(p.ang) * nose, p.ang);
+    }
+  }
+  for (const p of alienPoses()) {
+    if (p.a.gun === undefined) continue;
+    const key = 'a' + p.i;
+    if (nextShot[key] === undefined) nextShot[key] = T + 600;
+    while (T >= nextShot[key]) {
+      nextShot[key] += p.a.every;
+      volley(GUNS[p.a.gun], 1, p.x, p.y + p.w * 0.35, p.rot);
+    }
+  }
+}
+
+// ============================================================================
+// Drawing
+// ============================================================================
+const STARS = [];
+(function () {
+  const r = mulberry32(99);
+  for (let i = 0; i < 190; i++) {
+    const tint = r();
+    STARS.push({
+      x: r() * CANVAS_W, y: r() * CANVAS_H, s: 0.4 + r() * r() * 1.3, a: 0.2 + r() * 0.7,
+      tw: 0.4 + r() * 1.8, ph: r() * TAU,
+      c: tint < 0.14 ? '255,232,190' : tint < 0.3 ? '190,224,255' : '255,255,255',
+    });
+  }
+})();
+
+function draw(now) {
+  const c = ctx;
+  c.setTransform(canvas.width / CANVAS_W, 0, 0, canvas.height / CANVAS_H, 0, 0);
+  c.imageSmoothingEnabled = true;
+  c.imageSmoothingQuality = 'high';
+  c.globalCompositeOperation = 'source-over';
+  c.globalAlpha = 1;
+
+  const sky = c.createLinearGradient(0, 0, 0, CANVAS_H);
+  sky.addColorStop(0, '#070b16');
+  sky.addColorStop(1, '#04060b');
+  c.fillStyle = sky;
+  c.fillRect(0, 0, CANVAS_W, CANVAS_H);
+
+  for (const s of STARS) {
+    if (s.y > P.horizon + 40) continue;
+    const a = s.a * (0.72 + 0.28 * Math.sin(T / 1000 * s.tw + s.ph));
+    c.fillStyle = `rgba(${s.c},${a.toFixed(3)})`;
+    c.beginPath(); c.arc(s.x, s.y, s.s * 0.55, 0, TAU); c.fill();
+  }
+
+  if (layers) {
+    const Lr = layers, lw = Lr.W / Lr.kk, lh = Lr.H / Lr.kk;
+    const key = P.sunAngle.toFixed(2) + '|' + P.sunZ.toFixed(3);
+    if (Lr.litKey !== key) { relight(Lr); Lr.litKey = key; }
+    const R = P.radius, cy = P.horizon + R;
+    const hp = P.hp / 100;
+    c.drawImage(Lr.ground, 0, Lr.y0, lw, lh);
+
+    if (P.clouds && clouds) {
+      const ang = ((cloudAngle % clouds.per) + clouds.per) % clouds.per;
+      const L = sunVector();
+      const sl = Math.hypot(L.x, L.y) || 1;
+      const off = 3.2 * Math.hypot(L.x, L.y);
+      c.save();
+      c.translate(CX - L.x / sl * off, cy - L.y / sl * off);
+      c.rotate(ang);
+      c.globalAlpha = P.style === 'cel' ? 0.34 : 0.3;
+      c.drawImage(clouds.shadow, clouds.x - CX, clouds.y - cy, clouds.w, clouds.h);
+      c.restore();
+      c.save();
+      c.translate(CX, cy);
+      c.rotate(ang);
+      c.drawImage(clouds.cloud, clouds.x - CX, clouds.y - cy, clouds.w, clouds.h);
+      c.restore();
+    }
+
+    c.drawImage(Lr.shade, 0, Lr.y0, lw, lh);
+
+    c.globalCompositeOperation = 'lighter';
+    if (P.lights && hp > 0) { c.globalAlpha = hp; c.drawImage(Lr.lights, 0, Lr.y0, lw, lh); }
+    c.globalAlpha = 1;
+    drawFires(c);
+    // A barely-there breathing on the air so it reads as alive, not painted on.
+    c.globalAlpha = clamp(P.atmo * (0.75 + 0.25 * hp) * (1 + 0.035 * Math.sin(T / 1100)), 0, 1);
+    c.drawImage(Lr.atmo, 0, Lr.y0, lw, lh);
+    c.globalAlpha = 1;
+    drawImpacts(c, now, R, cy);
+    c.globalCompositeOperation = 'source-over';
+    drawSmoke(c);
+  }
+
+  if (P.zones) drawZones(c);
+  if (P.sprites) drawSprites(c);
+  if (P.panel !== 'off') drawPanel(c);
+}
+
+function activeFires() {
+  if (!layers || P.hp >= 75) return 0;
+  return Math.min(layers.fires.length, Math.ceil((75 - P.hp) / 75 * layers.fires.length));
+}
+function drawFires(c) {
+  const n = activeFires();
+  for (let i = 0; i < n; i++) {
+    const f = layers.fires[i];
+    const fl = 0.72 + 0.28 * Math.sin(T * 0.017 + i * 1.9) * Math.sin(T * 0.031 + i * 0.7);
+    const r = (4.2 + (i % 3)) * fl * 2.2;
+    const g = c.createRadialGradient(f.x, f.y, 0, f.x, f.y, r);
+    g.addColorStop(0, `rgba(255,236,170,${(0.95 * fl).toFixed(3)})`);
+    g.addColorStop(0.3, `rgba(255,128,40,${(0.6 * fl).toFixed(3)})`);
+    g.addColorStop(1, 'rgba(255,60,20,0)');
+    c.fillStyle = g;
+    c.beginPath(); c.arc(f.x, f.y, r, 0, TAU); c.fill();
+  }
+}
+function drawSmoke(c) {
+  const n = activeFires();
+  for (let i = 0; i < n; i++) {
+    const f = layers.fires[i];
+    for (let k = 0; k < 3; k++) {
+      const ph = ((T / 2400) + i * 0.37 + k / 3) % 1;
+      const dist = 2 + ph * 20;
+      const sway = Math.sin(T / 700 + i + k * 2) * 2 * ph;
+      const x = f.x + f.nx * dist - f.ny * sway, y = f.y + f.ny * dist + f.nx * sway;
+      const a = (1 - ph) * 0.3 * Math.min(1, ph * 6);
+      c.fillStyle = `rgba(40,36,42,${a.toFixed(3)})`;
+      c.beginPath(); c.arc(x, y, 2 + ph * 6, 0, TAU); c.fill();
+    }
+  }
+}
+function drawImpacts(c, now, R, cy) {
+  const pal = PALETTES[P.palette];
+  c.lineCap = 'round';
+  for (let i = impacts.length - 1; i >= 0; i--) {
+    const im = impacts[i], age = now - im.t0;
+    if (age > 1300) { impacts.splice(i, 1); continue; }
+    if (age < 0) continue;
+    const px = CX + R * Math.sin(im.th), py = cy - R * Math.cos(im.th);
+    const base = im.th - Math.PI / 2;            // canvas arc angles start at +x
+
+    // Local flare of the air around the strike
+    const ga = Math.max(0, 1 - age / 650);
+    if (ga > 0) {
+      c.strokeStyle = rgba(pal.atmo, 0.4 * ga);
+      c.lineWidth = 8;
+      c.beginPath(); c.arc(CX, cy, R + 2, base - 46 / R, base + 46 / R); c.stroke();
+    }
+    // Flash
+    const fa = Math.max(0, 1 - age / 480);
+    if (fa > 0) {
+      const r = 8 + 38 * (1 - Math.pow(1 - Math.min(1, age / 260), 3));
+      const g = c.createRadialGradient(px, py, 0, px, py, r);
+      g.addColorStop(0, `rgba(255,244,220,${(0.95 * fa).toFixed(3)})`);
+      g.addColorStop(0.35, `rgba(255,150,70,${(0.55 * fa).toFixed(3)})`);
+      g.addColorStop(1, 'rgba(255,90,40,0)');
+      c.fillStyle = g;
+      c.beginPath(); c.arc(px, py, r, 0, TAU); c.fill();
+    }
+    // Two pulses racing away along the limb — the atmosphere carrying the blow
+    const p = age / 1300, run = age / 1000 * 200, len = 28;
+    c.strokeStyle = rgba(pal.sunset, Math.pow(1 - p, 2) * 0.9);
+    c.lineWidth = 2.4 * (1 - p) + 0.6;
+    for (const sg of [-1, 1]) {
+      const a0 = base + sg * run / R;
+      c.beginPath(); c.arc(CX, cy, R + 1.2, a0 - len / (2 * R), a0 + len / (2 * R)); c.stroke();
+    }
+    // Shock ring
+    c.strokeStyle = `rgba(255,210,160,${(Math.pow(1 - p, 2) * 0.35).toFixed(3)})`;
+    c.lineWidth = 1.2;
+    c.beginPath(); c.arc(px, py, 4 + 64 * p, 0, TAU); c.stroke();
+  }
+}
+
+function drawZones(c) {
+  const zh = P.horizon / 3;
+  c.save();
+  c.setLineDash([4, 5]);
+  c.strokeStyle = 'rgba(150,180,220,0.28)';
+  c.lineWidth = 1;
+  c.font = `500 10px system-ui, -apple-system, "Segoe UI", sans-serif`;
+  c.fillStyle = 'rgba(150,180,220,0.6)';
+  const names = ['ZONE 1 · aggressive', 'ZONE 2 · balanced', 'ZONE 3 · defensive'];
+  for (let z = 0; z < 3; z++) {
+    if (z > 0) { c.beginPath(); c.moveTo(0, z * zh + 0.5); c.lineTo(CANVAS_W, z * zh + 0.5); c.stroke(); }
+    c.fillText(names[z], 8, z * zh + 52 - (z === 0 ? 0 : 38));
+  }
+  c.restore();
+}
+
+function drawSprites(c) {
+  if (!SK || !SK.ready) return;
+  const t = T;
+
+  // Meteors first: they are the biggest and slowest, the backdrop of the fight.
+  // Colour is size (CLAUDE.md §7.7), sized off the one normal width by METEOR_SIZE.
+  const zh = P.horizon / 3;
+  SCENE_METEORS.forEach((m, i) => {
+    const w = METEOR_W * METEOR_SIZE[m.row] * P.meteorScale;
+    const [ox, oy] = bob(i + 13, 2, 2);
+    c.save();
+    c.translate(m.x + ox, m.y(zh) + oy);
+    c.rotate(t * m.spin + i * 2.1);
+    if (SK.has('asteroids')) SK.drawAsteroid(c, m.row, SK.asteroidFrame(t + i * 211, 140), w);
+    else { const a = SK.ASTEROID_SPRITES[m.row]; SK.drawAsteroidPlaceholder(c, w, a.color, a.spark); }
+    c.restore();
+  });
+
+  // Shots, additive like every emissive layer, fading out over their last 80 ms.
+  c.save();
+  c.globalCompositeOperation = 'lighter';
+  for (const b of bullets) {
+    c.save();
+    c.globalAlpha = Math.min(1, (b.life - b.age) / 80);
+    c.translate(b.x, b.y);
+    c.rotate(b.ang);
+    const w = b.w * P.shotScale;
+    if (SK.has('bullets')) SK.drawBullet(c, b.row, SK.bulletFrame(b.age), w);
+    else SK.drawBulletPlaceholder(c, w);
+    c.restore();
+  }
+  c.restore();
+
+  for (const p of alienPoses()) {
+    c.save();
+    c.translate(p.x, p.y);
+    c.rotate(p.rot);
+    if (SK.has(p.a.atlas)) SK.drawEnemy(c, p.a.atlas, p.type.row, SK.enemyFrame(t + p.i * 91, p.type.frameMs), p.w);
+    else SK.drawEnemyPlaceholder(c, p.w);
+    c.restore();
+  }
+  for (const p of shipPoses()) {
+    c.save();
+    c.translate(p.x, p.y);
+    c.rotate(p.ang);
+    if (SK.has('ships')) SK.drawShip(c, p.s.row, SK.shipFrame(t + p.i * 137, false), 0, 0, p.w);
+    else SK.drawShipPlaceholder(c, p.w * 0.7);
+    c.restore();
+  }
+}
+
+// Rough mock of the build panel, only to see how much planet survives under it.
+function drawPanel(c) {
+  const y0 = CANVAS_H - PANEL_H, x0 = 4, w = CANVAS_W - 8, r = 14;
+  c.save();
+  c.beginPath();
+  c.moveTo(x0, CANVAS_H + 2); c.lineTo(x0, y0 + r); c.arcTo(x0, y0, x0 + r, y0, r);
+  c.lineTo(x0 + w - r, y0); c.arcTo(x0 + w, y0, x0 + w, y0 + r, r); c.lineTo(x0 + w, CANVAS_H + 2);
+  if (P.panel === 'glass') {
+    const g = c.createLinearGradient(0, y0, 0, CANVAS_H);
+    g.addColorStop(0, 'rgba(10,16,32,0.28)');
+    g.addColorStop(1, 'rgba(6,10,22,0.7)');
+    c.fillStyle = g;
+  } else {
+    c.fillStyle = 'rgba(8,12,24,0.95)';
+  }
+  c.fill();
+  c.strokeStyle = 'rgba(150,180,220,0.30)';
+  c.lineWidth = 1;
+  c.stroke();
+
+  const font = (px, wgt = 600) => `${wgt} ${px}px system-ui, -apple-system, "Segoe UI", sans-serif`;
+  const chip = (x, y, cw, ch, on, dim) => {
+    c.beginPath(); c.roundRect(x + 0.5, y + 0.5, cw - 1, ch - 1, 7);
+    c.fillStyle = on ? 'rgba(127,212,255,0.16)' : 'rgba(255,255,255,0.05)';
+    c.fill();
+    c.strokeStyle = on ? 'rgba(127,212,255,0.7)' : `rgba(150,180,220,${dim ? 0.14 : 0.3})`;
+    c.stroke();
+  };
+  c.textBaseline = 'middle';
+  const hulls = ['Interceptor', 'Warhammer', 'Tahyon'];
+  const hw = (w - 16 - 12) / 3;
+  hulls.forEach((n, i) => {
+    const x = x0 + 8 + i * (hw + 6), y = y0 + 10;
+    chip(x, y, hw, 28, i === 1, false);
+    if (SK && SK.has('ships')) SK.drawShip(c, i, 0, x + 15, y + 14, 14);
+    c.fillStyle = '#e6eef8'; c.font = font(10.5); c.textAlign = 'left';
+    c.fillText(n, x + 27, y + 14.5);
+  });
+  const guns = ['Spark', 'Plasma', 'Dagger', 'Fury', 'Lightning'];
+  const gw = (w - 16 - 16) / 5;
+  guns.forEach((n, i) => {
+    const x = x0 + 8 + i * (gw + 4), y = y0 + 44, dim = i === 4;
+    chip(x, y, gw, 24, i === 1, dim);
+    c.save();
+    c.globalAlpha = dim ? 0.35 : 1;
+    if (SK && SK.has('bullets')) { c.save(); c.translate(x + 10, y + 5); SK.drawBullet(c, i, 2, 7); c.restore(); }
+    c.fillStyle = '#c9d6ea'; c.font = font(9.5, 500); c.textAlign = 'left';
+    c.fillText(n, x + 18, y + 12.5);
+    c.restore();
+  });
+  const y = y0 + 78;
+  c.fillStyle = '#8aa0bd'; c.font = font(9.5); c.textAlign = 'left';
+  c.fillText('LEVEL', x0 + 10, y + 13);
+  for (let i = 0; i < 5; i++) {
+    c.beginPath(); c.arc(x0 + 54 + i * 15, y + 13, 5, 0, TAU);
+    c.fillStyle = i < 3 ? '#7fd4ff' : 'rgba(127,212,255,0.14)';
+    c.fill();
+  }
+  c.beginPath(); c.roundRect(x0 + w - 112, y, 104, 26, 8);
+  c.fillStyle = 'rgba(127,212,255,0.22)'; c.fill();
+  c.strokeStyle = 'rgba(127,212,255,0.8)'; c.stroke();
+  c.fillStyle = '#e6eef8'; c.font = font(11, 700); c.textAlign = 'center';
+  c.fillText('BUILD · $80', x0 + w - 60, y + 13.5);
+  c.restore();
+}
+
+// ============================================================================
+// Loop
+// ============================================================================
+let lastUiSync = 0;
+function frame(now) {
+  const dt = Math.min(100, now - lastNow);
+  lastNow = now;
+  if (P.animate) {
+    T += dt;
+    cloudAngle += P.cloudSpeed * DEG * dt / 1000;
+    if (P.sunOrbit) {
+      P.sunAngle += 360 * dt / SUN_ORBIT_MS;
+      if (P.sunAngle > 180) P.sunAngle -= 360;
+    }
+    updateBullets(dt);
+  }
+  draw(now);
+  // The sun slider follows the orbit, a few times a second, unless it is being dragged.
+  if (now - lastUiSync > 120) {
+    lastUiSync = now;
+    const el = sliderEls.sunAngle;
+    if (P.sunOrbit && !el.drag) { el.input.value = P.sunAngle; el.out.textContent = SLIDERS.sunAngle.fmt(P.sunAngle); }
+    updateStatus();
+  }
+  requestAnimationFrame(frame);
+}
+
+// ============================================================================
+// Controls
+// ============================================================================
+const SLIDERS = {
+  horizon:     { label: 'Horizon height',        min: 400, max: 580, step: 2,     kinds: BOTH,   fmt: (v) => `y ${v}` },
+  radius:      { label: 'Planet radius',         min: 360, max: 1400, step: 10,   kinds: BOTH,   fmt: (v) => `${(v / CANVAS_W).toFixed(2)}× width` },
+  sunAngle:    { label: 'Sun direction',         min: -180, max: 180, step: 1,    kinds: 0,      fmt: (v) => `${Math.round(v)}°` },
+  sunZ:        { label: 'Sun behind ↔ in front', min: -0.95, max: 0.9, step: 0.05, kinds: 0,     fmt: (v) => (+v).toFixed(2) },
+  thick:       { label: 'Thickness',             min: 2, max: 20, step: 0.5,      kinds: STATIC, fmt: (v) => `${v} px` },
+  atmo:        { label: 'Brightness',            min: 0, max: 1, step: 0.05,      kinds: 0,      fmt: (v) => `${Math.round(v * 100)}%` },
+  cover:       { label: 'Cover',                 min: 0, max: 1, step: 0.05,      kinds: CLOUDS, fmt: (v) => `${Math.round(v * 100)}%` },
+  cloudSpeed:  { label: 'Drift',                 min: 0, max: 4, step: 0.1,       kinds: 0,      fmt: (v) => `${(+v).toFixed(1)}°/s` },
+  hp:          { label: 'Planet HP',             min: 0, max: 100, step: 1,       kinds: 0,      fmt: (v) => `${v}%` },
+  shipScale:   { label: 'Ship size',             min: 0.4, max: 2, step: 0.05,    kinds: 0,
+                 fmt: (v) => `${(+v).toFixed(2)}× · ` + HULL_W.map((w) => Math.round(w * v)).join(' / ') + ' px' },
+  enemyScale:  { label: 'Enemy size',            min: 0.4, max: 2, step: 0.05,    kinds: 0,
+                 fmt: (v) => `${(+v).toFixed(2)}× · ${Math.round(36 * ENEMY_BASE * v)}–${Math.round(48 * ENEMY_BASE * v)} px` },
+  meteorScale: { label: 'Meteor size',           min: 0.4, max: 2.5, step: 0.05,  kinds: 0,
+                 fmt: (v) => `${(+v).toFixed(2)}× · ` + METEOR_SIZE.map((k) => Math.round(METEOR_W * k * v)).join(' / ') + ' px' },
+  shotScale:   { label: 'Shot size',             min: 0.4, max: 2, step: 0.05,    kinds: 0,
+                 fmt: (v) => `${(+v).toFixed(2)}× · ${(8 * v).toFixed(1)}–${(11 * v).toFixed(1)} px` },
+};
+const sliderEls = {};
+document.querySelectorAll('.row[data-key]').forEach((row) => {
+  const key = row.dataset.key, s = SLIDERS[key];
+  row.innerHTML = `<label><span>${s.label}</span><span></span></label>
+    <input type="range" min="${s.min}" max="${s.max}" step="${s.step}">`;
+  const input = row.querySelector('input'), out = row.querySelector('label span:last-child');
+  input.value = P[key];
+  out.textContent = s.fmt(P[key]);
+  const el = sliderEls[key] = { input, out, drag: false };
+  input.addEventListener('pointerdown', () => { el.drag = true; });
+  input.addEventListener('input', () => {
+    P[key] = +input.value;
+    out.textContent = s.fmt(P[key]);
+    if (s.kinds) requestBuild(s.kinds, true);
+  });
+  input.addEventListener('change', () => { el.drag = false; if (s.kinds) requestBuild(s.kinds, false); });
+});
+window.addEventListener('pointerup', () => { for (const k in sliderEls) sliderEls[k].drag = false; });
+function setSlider(key, v) {
+  P[key] = v;
+  sliderEls[key].input.value = v;
+  sliderEls[key].out.textContent = SLIDERS[key].fmt(v);
+}
+
+document.querySelectorAll('.seg[data-key]').forEach((seg) => {
+  const key = seg.dataset.key;
+  const sync = () => seg.querySelectorAll('button').forEach((b) => b.classList.toggle('on', b.dataset.v === P[key]));
+  seg.querySelectorAll('button').forEach((b) => b.addEventListener('click', () => {
+    if (P[key] === b.dataset.v) return;
+    P[key] = b.dataset.v;
+    sync();
+    if (key === 'palette') setSlider('cover', PALETTES[P.palette].cover);
+    if (key === 'style' || key === 'palette') build(BOTH, 1);
+    if (key === 'panel') build(STATIC, 1);          // fire spots avoid a solid panel
+  }));
+  sync();
+});
+
+document.querySelectorAll('input[type=checkbox][data-key]').forEach((cb) => {
+  cb.checked = P[cb.dataset.key];
+  cb.addEventListener('change', () => { P[cb.dataset.key] = cb.checked; });
+});
+
+document.getElementById('newSeed').addEventListener('click', () => {
+  P.seed = 1 + Math.floor(Math.random() * 9999);
+  seedNoise(P.seed);
+  build(BOTH, 1);
+});
+function randomHit(delay) {
+  const R = P.radius, cy = P.horizon + R;
+  const vis = Math.max(Math.asin(Math.min(1, CX / R)), Math.atan2(CX, cy - CANVAS_H));
+  impacts.push({ th: (Math.random() * 2 - 1) * vis * 0.85, t0: performance.now() + (delay || 0) });
+}
+document.getElementById('hit').addEventListener('click', () => randomHit(0));
+document.getElementById('barrage').addEventListener('click', () => {
+  for (let i = 0; i < 7; i++) randomHit(i * 140 + Math.random() * 80);
+});
+
+canvas.addEventListener('pointerdown', (e) => {
+  const r = canvas.getBoundingClientRect();
+  const x = (e.clientX - r.left) / r.width * CANVAS_W, y = (e.clientY - r.top) / r.height * CANVAS_H;
+  const R = P.radius, cy = P.horizon + R, dx = x - CX, dy = y - cy;
+  if (Math.hypot(dx, dy) < R + 26) impacts.push({ th: Math.atan2(dx, -dy), t0: performance.now() });
+});
+
+// ============================================================================
+// Go
+// ============================================================================
+seedNoise(P.seed);
+resizeCanvas();
+build(BOTH, 1);
+if (SK) {
+  SK.basePath = SPRITE_BASE;
+  SK.load(() => updateStatus());
+}
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

@@ -14,10 +14,9 @@
 <div id="status">loading…</div>
 <canvas id="c" width="1000" height="720"></canvas>
 
-<!-- Absolute path so this harness works from the scratchpad, outside the repo. -->
-<script src="spaceships_sprites.js"></script>
+<script src="js/spaceships_sprites.js"></script>
 <script>
-SpriteKit.basePath = 'file:///C:/Projects/ultralight-games/game6/assets/sprites/';
+SpriteKit.basePath = 'assets/sprites/';
 
 const cv = document.getElementById('c');
 const ctx = cv.getContext('2d');
