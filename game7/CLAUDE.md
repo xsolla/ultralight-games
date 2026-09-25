@@ -446,8 +446,11 @@ A ship is built from three choices: **hull**, **gun**, **gun level (1–5)**.
     2X, and so on.
   - With X = 10 the cumulative prices are 10 / 25 / 45 / 70 / 100, so level 5 costs 10×
     level 1.
-  - **`levelCost` and `basePrice` are per gun** so each can be tweaked separately. Today
-    all five guns carry the same values (doc: "Base price: 100%").
+  - **`levelCost` and `basePrice` are per gun** so each can be tweaked separately. The
+    doc's "Base price: 100%" for every gun was the first guess; the designer priced
+    them apart on 2026-09-25 (§9 "Guns").
+  - **Gun price is truncated, not rounded** (`Math.trunc`), so a non-integer
+    `basePrice` (e.g. Plasma's 0.7) never rounds up.
 - **Lightning Gun mounts on Tahyon only** (`GUNS[i].mountOn = [2]`). The build popup
   shows it locked for other hulls. Tahyon can mount every gun.
 - **Build time is per hull:** Interceptor 3 s, Warhammer 4 s, Tahyon 5 s. The healer
@@ -748,10 +751,19 @@ the longest range in the game (§7.3).
 | Flame Fury | 400 / level ms (L5 = 80 ms) | 300 px/s | 300 ms | 90 px | 10 |
 | Lightning | 571 ms | 540 px/s | 1500 ms | 810 px | 10 |
 
-Prices for every gun: `basePrice` 100% (X = 10), `levelCost [1, 1.5, 2, 2.5, 3]` →
-10 / 25 / 45 / 70 / 100.
+**Gun prices were split apart from the doc's flat 100% on 2026-09-25** (designer,
+playtested). `levelCost [1, 1.5, 2, 2.5, 3]` is unchanged and shared; only `basePrice`
+differs per gun, truncated (not rounded) at each level:
 
-Cheapest ship: Interceptor + Spark L1 = 30. Most expensive: Tahyon + Lightning L5 = 150.
+| Gun | `basePrice` | Lvl 1 | Lvl 2 | Lvl 3 | Lvl 4 | Lvl 5 |
+|---|---|---|---|---|---|---|
+| Spark | 0.6 | 6 | 15 | 27 | 42 | 60 |
+| Plasma | 0.7 | 7 | 17 | 31 | 49 | 70 |
+| Mystic Dagger | 1.0 (unchanged) | 10 | 25 | 45 | 70 | 100 |
+| Flame Fury | 0.9 | 9 | 22 | 40 | 63 | 90 |
+| Lightning | 1.2 | 12 | 30 | 54 | 84 | 120 |
+
+Cheapest ship: Interceptor + Spark L1 = 26. Most expensive: Tahyon + Lightning L5 = 170.
 
 ### Healer (`HEALER`)
 

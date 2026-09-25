@@ -8,12 +8,13 @@
 // ============================================================================
 
 // Level L costs GUN_PRICE x basePrice x the sum of the gun's first L levelCost
-// entries: X, then +1.5X, +2X ... (CLAUDE.md §7.2).
+// entries: X, then +1.5X, +2X ... (CLAUDE.md §7.2). Truncated, not rounded: a
+// non-integer basePrice (e.g. Plasma's 0.7) should never round up in price.
 function gunPrice(gunIdx, level) {
   const g = GUNS[gunIdx];
   let sum = 0;
   for (let i = 0; i < level; i++) sum += g.levelCost[i];
-  return Math.round(BASE.GUN_PRICE * g.basePrice * sum);
+  return Math.trunc(BASE.GUN_PRICE * g.basePrice * sum);
 }
 
 function canMount(hullIdx, gunIdx) {

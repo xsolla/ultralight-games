@@ -54,11 +54,11 @@ const GUNS = [
   { key: 'spark', name: 'Spark Gun', short: 'SPARK', row: 0, sfx: 'weaponSpark',
     fireRate: 1.0, bulletSpeed: 1.0, life: 1.0, levels: 'count',
     pattern: 'fan', spreadDeg: 15,
-    basePrice: 1.0, levelCost: [1, 1.5, 2, 2.5, 3], mountOn: null, dispW: 9 },
+    basePrice: 0.6, levelCost: [1, 1.5, 2, 2.5, 3], mountOn: null, dispW: 9 },
   { key: 'plasma', name: 'Plasma Gun', short: 'PLASMA', row: 1, sfx: 'weaponPlasma',
     fireRate: 0.8, bulletSpeed: 0.8, life: 1.6, levels: 'count',
     pattern: 'fan', spreadDeg: 30,
-    basePrice: 1.0, levelCost: [1, 1.5, 2, 2.5, 3], mountOn: null, dispW: 11 },
+    basePrice: 0.7, levelCost: [1, 1.5, 2, 2.5, 3], mountOn: null, dispW: 11 },
   // Lifetime halved from the doc's 200% (designer, 2026-09-24): range 4.0 -> 2.0.
   { key: 'mystic', name: 'Mystic Dagger', short: 'DAGGER', row: 2, sfx: 'weaponDagger',
     fireRate: 1.0, bulletSpeed: 2.0, life: 1.0, levels: 'count',
@@ -67,13 +67,13 @@ const GUNS = [
   { key: 'fury', name: 'Flame Fury', short: 'FURY', row: 3, sfx: 'weaponFury',
     fireRate: 1.0, bulletSpeed: 1.0, life: 0.5, levels: 'rate',
     pattern: 'sweep', spreadDeg: 10, sweepMs: 700,
-    basePrice: 1.0, levelCost: [1, 1.5, 2, 2.5, 3], mountOn: null, dispW: 10 },
+    basePrice: 0.9, levelCost: [1, 1.5, 2, 2.5, 3], mountOn: null, dispW: 10 },
   // Lifetime raised from the doc's 200% to 250% (designer, 2026-09-23) so the
   // Tahyon's gun out-ranges the Mystic Dagger — long range is that hull's whole role.
   { key: 'lightning', name: 'Lightning Gun', short: 'LIGHTNING', row: 4, sfx: 'weaponLightning',
     fireRate: 0.7, bulletSpeed: 1.8, life: 2.5, levels: 'count',
     pattern: 'fan', spreadDeg: 10,
-    basePrice: 1.0, levelCost: [1, 1.5, 2, 2.5, 3], mountOn: [2], dispW: 10 },
+    basePrice: 1.2, levelCost: [1, 1.5, 2, 2.5, 3], mountOn: [2], dispW: 10 },
 ];
 const GUN_LEVELS = 5;
 
