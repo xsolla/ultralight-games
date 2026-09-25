@@ -119,7 +119,7 @@ inventing a new home.
   js/game.js                the Game object: state, screens, input, main loop, collision consequences, resize, fullscreen
   assets/sprites/*.png      the five atlases (ships, projectiles, 2x aliens, asteroids)
   assets/sfx/*.mp3          29 one-shots, same set as game6
-  assets/bgm/*.mp3          bgm_title + bgm_ship1..3, same set as game6
+  assets/bgm/*.mp3          bgm_title + bgm_battle1..3, game7's own set (game6 keeps its own bgm_ship1..3)
   sprite_harness.html       dev-only visual check of SpriteKit
   planet_test.html          dev-only planet look-dev page; the reference for planet.js (§6)
   .claude/launch.json       preview-pane config: `python -m http.server 8087` in this folder
@@ -327,7 +327,7 @@ Ask before adding a planet image.
 
 | Setting | Value |
 |---|---|
-| Style / palette | Soft (painted), Terran |
+| Style / palette | Soft (painted); palette defaults to Terran, player-selectable (below) |
 | Horizon (top of the disc at screen centre) | y = 560 |
 | Radius | 490 px, 1.36× the screen width. The arc drops to y ≈ 594 at the screen edges. |
 | Sun direction | 14° (just right of straight up) |
@@ -339,6 +339,16 @@ Ask before adding a planet image.
 With the sun that far behind, the planet is **backlit**: a bright rim runs along the whole
 horizon, a thin sunlit crescent hugs the limb, and the night side below it shows city
 lights.
+
+**Planet type is player-selectable** (settled 2026-09-25). `planet_test.html`'s four
+palettes — Terran, Desert, Glacier, Alien — are all ported into `planet.js` as
+`PALETTES`, keyed the same way; the style stays Soft-only. The title screen shows one
+small button per palette (menu.js's planet-type row, §11); pressing one calls
+`Planet.setPalette(key)`, which swaps the palette and the picked palette's own cloud
+cover, then rebuilds in the background exactly like a resize — the old look keeps
+drawing until the new one is lit, so the switch never blanks the screen. Since `Planet`
+is the one instance the title screen and a run both draw, whatever was chosen carries
+straight into the next run with no extra wiring.
 
 **Technique.** Everything stays `file://`-safe: pixels are written into offscreen
 canvases with `putImageData` and never read back.
@@ -622,6 +632,11 @@ time by **tapping the ship and choosing from the menu that appears** (§11).
     pick it as a target.
 - It stays past the start of the next wave until its HP is spent. With nothing to heal it
   hovers just above the planet.
+- **With more than one medic in the air, no two ever fly to the same patient**
+  (settled 2026-09-25). Each keeps its own patient locked until full or gone, same as
+  today; a medic *picking a new one* skips anyone another active medic already has
+  locked, and falls back to the next-farthest unclaimed ship. A medic with nothing left
+  unclaimed just hovers, same as having nothing to heal at all.
 
 ### 7.10 Economy, losing, records
 
@@ -642,12 +657,18 @@ time by **tapping the ship and choosing from the menu that appears** (§11).
   - The game name.
   - The Xsolla wordmark, per `../branding.md` §1 (title screen only).
   - Start and Records buttons.
+  - Between them, four small buttons to pick the planet's look — Terran / Desert /
+    Glacier / Alien (§6) — applied at once and carried into the run.
+  - Between the title and START, all three hulls fly a slow, looping decorative
+    patrol (menu.js's `MENU_SHIPS`, settled 2026-09-25) — no game state, purely a
+    function of elapsed time, so it costs nothing to have running under the UI.
   - The sound + fullscreen buttons.
 
-### 7.11 HP bars on everything (testing aid)
+### 7.11 HP bars on damaged entities (testing aid)
 
-**For now, everything that has HP shows an HP bar over it, at all times**, full HP
-included. The designer needs it for balance testing. It covers:
+**Everything that has HP shows an HP bar over it while it's damaged** — narrowed from
+"always, full HP included" to "damaged only" on 2026-09-25, as this section always said
+it might be. A full-HP entity draws no bar at all. It covers:
 
 - player ships
 - the healer, whose bar is its remaining heal budget
@@ -658,8 +679,8 @@ included. The designer needs it for balance testing. It covers:
 Rules:
 
 - **It is one switch:** `SHOW_HP_BARS = true` in `constants.js`. Every bar goes through
-  one draw function in `render.js`. Later it can be turned off, or narrowed to "damaged
-  only", without touching entity code.
+  one draw function in `render.js`, which is also the one place the "damaged only" filter
+  lives — entity code never checks its own HP fraction to decide whether to draw.
 - **Bars are screen-aligned.** Draw them outside the entity's rotate transform, centred
   above the sprite. For a ship, that means above the hull, not the plume. Width follows
   the entity's `dispW`, with a floor so small aliens still get a readable bar.
@@ -789,6 +810,12 @@ These are all slower than the slowest passive. Every gun is level 1.
 Store one `METEOR_W` (the normal width) plus a per-row `sizeMult` of 0.8 / 1.0 / 1.2.
 Don't store three separate widths.
 
+The speeds above read too slow in playtests. Each meteor rolls its own multiplier from
+`METEOR_SPEED_MULT = [2, 3]` in `meteors.js` at spawn time and keeps it for its whole
+flight, so a wave's meteors visibly don't all move at the same speed (designer,
+2026-09-25). The table above stays the base (the 100% a designer tunes); actual on-screen
+speed is base × that roll, i.e. roughly 36–54 / 26–39 / 18–27 px/s for small/medium/large.
+
 ### Display sizes (`SIZE_SCALE`, settled 2026-09-24)
 
 The designer picked these with the sliders in `planet_test.html`. Every table keeps its
@@ -831,8 +858,12 @@ const SIZE_SCALE = { ship: 0.65, enemy: 0.75, meteor: 1.0, shot: 0.8 };
   - Crossfades are equal-power.
   - Nothing plays before the first gesture, and `Sound.resume()` is armed last in
     `bindInput`.
-- Music: `bgm_title` on the title screen. In a run, cycle `bgm_ship1 → 2 → 3`, advancing
-  at each wave break with game6's crossfade. This is a proposal, not decided.
+- Music (settled 2026-09-25): `bgm_title` loops on the title screen. In a run, one of
+  `bgm_battle1/2/3` plays at random, once through (no loop). When it ends, a different
+  one of the three is chosen at random — never the one that just played — and takes
+  over. This never depends on wave state, planet damage, or anything else happening in
+  the run; only the track finishing drives the next pick. Title ↔ run transitions still
+  use game6's crossfade.
 - This game has many guns firing at once, so gun and enemy-fire sounds need **tight
   `gap`s and low `vol`**, or the mix becomes a wall of noise.
 
@@ -916,7 +947,8 @@ Settled on 2026-09-23 and recorded above; kept here so the reasoning isn't re-op
 - Meteor colours: grey = small, magenta = medium, azure = large (§7.7).
 - Tahyon mounts every gun; Lightning is Tahyon-only (§7.2).
 - Built ships are never upgraded (§7.2).
-- HP bars on everything, always, while testing (§7.11).
+- HP bars on everything while testing, now narrowed to damaged only (§7.11; the
+  narrowing itself was settled 2026-09-25, see below).
 - The planet is procedural: its look, geometry and settings are recorded in §6
   (2026-09-24).
 - Meteor sizes: small = 80% and large = 120% of the normal meteor (§7.7).
@@ -926,3 +958,15 @@ Settled on 2026-09-23 and recorded above; kept here so the reasoning isn't re-op
 - No build panel: one build button and a tech-spec popup with BUILD / CLOSE (§11).
 - The popup never pauses the game; BUILD places the order and closes it; the medic is
   the popup's fourth tab (designer, 2026-09-24).
+
+Settled on 2026-09-25 and recorded above; kept here so the reasoning isn't re-opened:
+
+- The title screen's planet is player-selectable among all four `planet_test.html`
+  palettes, applied at once and carried into the run (§6, §11).
+- The title screen flies all three hulls in a decorative, stateless patrol between the
+  title and START (§11).
+- With more than one medic in the air, none share a patient — a medic picking a new one
+  skips anyone another active medic already has locked (§7.9).
+- HP bars are damaged-only: a full-HP entity draws no bar (§7.11).
+- Meteors were too slow: each now rolls a random 2–3× speed multiplier at spawn,
+  `METEOR_SPEED_MULT` in `meteors.js` (§9 "Meteors").

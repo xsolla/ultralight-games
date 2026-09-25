@@ -31,10 +31,13 @@ const MENU = {
 
   START_Y: 356,
   START_H: 50,
-  SCORES_Y: 420,
+  PLANET_Y: 416,        // the planet-type row, between START and HIGH SCORES
+  PLANET_H: 26,
+  PLANET_GAP: 8,
+  SCORES_Y: 452,
   SCORES_H: 40,
   BTN_W: 232,
-  HINT_Y: 496,
+  HINT_Y: 528,
 };
 
 // Hit slop, as HUD_BTN_SLOP is for the shared buttons.
@@ -114,6 +117,49 @@ function drawXsollaLogo(ctx, x, y, w) {
   ctx.restore();
 }
 
+// ---- Flying ships ----------------------------------------------------------------
+// Three decorative hulls patrolling the gap between the title and START — no
+// game state, just SpriteKit drawn along a smooth, time-driven loop so the
+// title screen feels alive. Purely a function of game.time, so it needs no
+// state of its own (unlike Stars/Planet, which own a clock).
+//
+// Lane y, horizontal amplitude and period are per hull; the Interceptor's
+// short period reads as a dart, the Warhammer's long one as a lumber — the
+// same speed personalities the roster has in a run (CLAUDE.md §9).
+const MENU_SHIPS = [
+  { row: 0, y: 238, ax: 118, periodMs: 5200, phase: 0,    bobAmp: 6, bobMs: 1900, bobPhase: 0.4 },  // Interceptor
+  { row: 2, y: 282, ax: 96,  periodMs: 7400, phase: 2.3,  bobAmp: 7, bobMs: 2300, bobPhase: 1.7 },  // Tahyon
+  { row: 1, y: 328, ax: 70,  periodMs: 9600, phase: 4.6,  bobAmp: 5, bobMs: 2700, bobPhase: 3.1 },  // Warhammer
+];
+const MENU_SHIP_CX = CANVAS_W / 2;
+
+// Position and heading at `time`, from a Lissajous loop: heading follows the
+// path's own velocity vector (same atan2(dx, -dy) convention ships.js steers
+// by), so the hull banks into its turns instead of staying nose-up.
+function menuShipPose(ms, time) {
+  const wx = TAU / ms.periodMs, wy = TAU / ms.bobMs;
+  const tx = time * wx + ms.phase, ty = time * wy + ms.bobPhase;
+  const x = MENU_SHIP_CX + ms.ax * Math.sin(tx);
+  const y = ms.y + ms.bobAmp * Math.sin(ty);
+  const vx = ms.ax * wx * Math.cos(tx);
+  const vy = ms.bobAmp * wy * Math.cos(ty);
+  return { x, y, heading: Math.atan2(vx, -vy) };
+}
+
+function drawMenuShips(ctx, time) {
+  for (const ms of MENU_SHIPS) {
+    const p = menuShipPose(ms, time);
+    const w = HULLS[ms.row].dispW * SIZE_SCALE.ship;
+    const frame = SpriteKit.shipFrame(time + ms.phase * 1000, false);
+    ctx.save();
+    ctx.translate(p.x, p.y);
+    ctx.rotate(p.heading);
+    if (SpriteKit.has('ships')) SpriteKit.drawShip(ctx, ms.row, frame, 0, 0, w);
+    else SpriteKit.drawShipPlaceholder(ctx, w * 0.7);
+    ctx.restore();
+  }
+}
+
 // ---- Button layout -------------------------------------------------------------
 function menuButtonRects() {
   const x = (CANVAS_W - MENU.BTN_W) / 2;
@@ -132,13 +178,40 @@ function menuButtonAt(px, py) {
   return null;
 }
 
+// ---- Planet-type row -----------------------------------------------------------
+// One small chip per Planet.palettes entry (planet.js owns the colour data;
+// this only ever sees the {key, label} list). Picking one calls
+// Planet.setPalette(key), which affects the title screen at once — and the
+// run afterwards, since it's the same Planet instance both draw.
+function planetButtonRects() {
+  const list = Planet.palettes;
+  const gap = MENU.PLANET_GAP;
+  const w = (MENU.BTN_W - (list.length - 1) * gap) / list.length;
+  const x0 = (CANVAS_W - MENU.BTN_W) / 2;
+  return list.map((p, i) => ({
+    id: p.key, label: p.label,
+    x: x0 + i * (w + gap), y: MENU.PLANET_Y, w, h: MENU.PLANET_H,
+  }));
+}
+
+function planetButtonAt(px, py) {
+  const k = MENU_BTN_SLOP;
+  for (const r of planetButtonRects()) {
+    if (px >= r.x - k && px <= r.x + r.w + k &&
+        py >= r.y - k && py <= r.y + r.h + k) return r.id;
+  }
+  return null;
+}
+
 // ---- Drawing -------------------------------------------------------------------
 function drawMenu(ctx, game) {
   Stars.draw(ctx, game.time);
   Planet.draw(ctx, 1, game.time);
   drawMenuTitle(ctx, game.time);
   drawXsollaLogo(ctx, MENU.LOGO_X, MENU.LOGO_Y, MENU.LOGO_W);
+  drawMenuShips(ctx, game.time);
   drawMenuButtons(ctx, game);
+  drawPlanetButtons(ctx, game);
   drawMenuHint(ctx);
   drawHudButtons(ctx, game);
 }
@@ -217,6 +290,33 @@ function drawGhostButton(ctx, r, hot, label) {
   ctx.font = `700 12px ${FONT}`;
   ctx.fillStyle = hot ? COLORS.hudText : MENU_SKIN.accentDim;
   drawTracked(ctx, label, r.x + r.w / 2, r.y + r.h / 2 + 0.5, 2.6);
+}
+
+function drawPlanetButtons(ctx, game) {
+  for (const r of planetButtonRects()) {
+    const on = Planet.paletteKey === r.id;
+    const hot = game.hover === 'ptype:' + r.id;
+    drawPlanetChip(ctx, r, on, hot);
+  }
+}
+
+// Smaller and quieter than the ghost button: this is a look picker, not a
+// primary action, so only the chosen one (`on`, filled like the records
+// card's own-row pill) is meant to stand out.
+function drawPlanetChip(ctx, r, on, hot) {
+  roundRectPath(ctx, r.x, r.y, r.w, r.h, 7);
+  ctx.fillStyle = on ? MENU_SKIN.pillOn : hot ? MENU_SKIN.fillHover : MENU_SKIN.fill;
+  ctx.fill();
+  ctx.lineWidth = 1;
+  ctx.strokeStyle = on ? MENU_SKIN.strokeOn : hot ? MENU_SKIN.strokeHover : MENU_SKIN.stroke;
+  ctx.stroke();
+
+  ctx.textBaseline = 'middle';
+  ctx.textAlign = 'center';
+  ctx.font = `700 8px ${FONT}`;
+  ctx.fillStyle = on ? MENU_SKIN.onText : hot ? COLORS.hudText : MENU_SKIN.accentDim;
+  ctx.fillText(r.label, r.x + r.w / 2, r.y + r.h / 2 + 0.5);
+  ctx.textAlign = 'left';
 }
 
 function drawMenuHint(ctx) {
