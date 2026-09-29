@@ -729,45 +729,110 @@ const Tilesets = {
       ctx.restore();
     },
 
-    // fire (red) — a stream of rising, color-shifting ember particles
-    // (procedural: each of a fixed slot count runs its own short
-    // rise-and-fade lifecycle computed straight from elapsed time, so no
-    // persistent particle array is needed). Matches the particle language
-    // Life/Void already use, instead of the old single solid flame shape.
+    // fire (red) — a small campfire: two crossed logs, a broad warm glow,
+    // a row of independently flickering flame tongues across the width
+    // (tallest in the middle, each layered red → orange → small pale core),
+    // plus sparks drifting up from the whole bed.
+    // Everything is computed straight from elapsed time — no particle state.
     drawFire(ctx, cx, cy, r, seed, timeMs) {
-      const baseY = cy + r * 0.62;
-      const count = 16;
-      const period = 950;
+      const t = timeMs / 1000 + seed * 10;
+      const logY = cy + r * 0.6;
+      const baseY = cy + r * 0.5; // where the flames sprout from the logs
 
-      // warm glow at the source, grounding the embers
-      const glow = ctx.createRadialGradient(cx, baseY, 0, cx, baseY, r * 0.5);
-      glow.addColorStop(0, 'rgba(255, 180, 90, 0.35)');
-      glow.addColorStop(1, 'rgba(255, 120, 60, 0)');
+      // broad ground glow — wider than it is tall, like light on the ground
+      ctx.save();
+      ctx.translate(cx, baseY);
+      ctx.scale(1, 0.6);
+      const flick = 0.85 + 0.15 * Math.sin(t * 7.3) * Math.sin(t * 3.1 + 1);
+      const glow = ctx.createRadialGradient(0, 0, 0, 0, 0, r * 0.95);
+      glow.addColorStop(0, `rgba(255, 170, 80, ${0.55 * flick})`);
+      glow.addColorStop(0.5, `rgba(255, 110, 50, ${0.25 * flick})`);
+      glow.addColorStop(1, 'rgba(255, 80, 40, 0)');
       ctx.beginPath();
-      ctx.arc(cx, baseY, r * 0.5, 0, Math.PI * 2);
+      ctx.arc(0, 0, r * 0.95, 0, Math.PI * 2);
       ctx.fillStyle = glow;
       ctx.fill();
+      ctx.restore();
 
-      for (let i = 0; i < count; i++) {
-        const offset = (i / count) * period + seed * 5000;
-        const localT = ((timeMs + offset) % period) / period; // 0..1 lifecycle
-        const sway = Math.sin(localT * Math.PI * 2.4 + i * 1.7 + seed * 9) * r * 0.1 * localT
-          + Math.sin(i * 12.9 + seed * 5) * r * 0.05 * (1 - localT);
-        const px = cx + sway;
-        const py = baseY - localT * r * 1.2;
-        const size = r * 0.15 * (1 - localT * 0.65) * (0.6 + 0.4 * Math.sin(i * 3.1 + seed * 2));
-        const alpha = Math.sin(localT * Math.PI); // fades in, peaks mid-rise, fades out
-
-        let color;
-        if (localT < 0.3) color = `rgba(255, 235, 180, ${alpha})`;
-        else if (localT < 0.65) color = `rgba(255, 150, 60, ${alpha})`;
-        else color = `rgba(210, 70, 55, ${alpha * 0.75})`;
-
+      // two crossed logs, with lighter end-grain caps
+      const logLen = r * 1.05, logThick = r * 0.17;
+      [-0.32, 0.32].forEach((angle) => {
+        ctx.save();
+        ctx.translate(cx, logY);
+        ctx.rotate(angle);
+        const lg = ctx.createLinearGradient(0, -logThick / 2, 0, logThick / 2);
+        lg.addColorStop(0, '#8a4f2c');
+        lg.addColorStop(1, '#3e2114');
+        ctx.fillStyle = lg;
         ctx.beginPath();
-        ctx.arc(px, py, Math.max(0.5, size), 0, Math.PI * 2);
-        ctx.fillStyle = color;
+        ctx.rect(-logLen / 2, -logThick / 2, logLen, logThick);
+        ctx.fill();
+        ctx.fillStyle = '#b77a4a';
+        [-1, 1].forEach((side) => {
+          ctx.beginPath();
+          ctx.ellipse(side * logLen / 2, 0, logThick * 0.28, logThick / 2, 0, 0, Math.PI * 2);
+          ctx.fill();
+        });
+        ctx.restore();
+      });
+
+      // flame tongues, back (short, outer) to front (tall, center)
+      const tongues = [
+        { x: -0.34, w: 0.3, h: 0.55, p: 0.0 },
+        { x: 0.34, w: 0.28, h: 0.5, p: 2.1 },
+        { x: -0.13, w: 0.4, h: 0.85, p: 4.3 },
+        { x: 0.14, w: 0.38, h: 0.78, p: 1.2 },
+        { x: 0.0, w: 0.36, h: 1.0, p: 3.3 },
+      ];
+      // kept red-dominant (normal blending, small pale core) so the token
+      // still reads as "red" at in-game size and never drifts toward Star's
+      // yellow where the tongues overlap
+      const layers = [
+        { s: 1.0, inner: 'rgba(235, 60, 30, 0.95)', outer: 'rgba(200, 30, 20, 0)' },
+        { s: 0.66, inner: 'rgba(255, 130, 45, 0.9)', outer: 'rgba(245, 80, 30, 0)' },
+        { s: 0.34, inner: 'rgba(255, 215, 140, 0.9)', outer: 'rgba(255, 160, 70, 0)' },
+      ];
+      ctx.save();
+      tongues.forEach((tg) => {
+        const ph = tg.p + seed * 7;
+        const h = r * tg.h * (1 + 0.14 * Math.sin(t * 9.1 + ph) + 0.08 * Math.sin(t * 14.7 + ph * 2));
+        const sway = r * 0.07 * Math.sin(t * 5.3 + ph) + r * 0.03 * Math.sin(t * 11 + ph);
+        const fx = cx + r * tg.x;
+        layers.forEach((L) => {
+          const w = r * tg.w * L.s;
+          const lh = h * (0.35 + 0.65 * L.s);
+          const tipX = fx + sway * (0.6 + 0.4 * L.s);
+          const tipY = baseY - lh;
+          ctx.beginPath();
+          ctx.moveTo(fx - w / 2, baseY);
+          ctx.bezierCurveTo(fx - w / 2, baseY - lh * 0.45, tipX - w * 0.18, baseY - lh * 0.75, tipX, tipY);
+          ctx.bezierCurveTo(tipX + w * 0.18, baseY - lh * 0.75, fx + w / 2, baseY - lh * 0.45, fx + w / 2, baseY);
+          ctx.quadraticCurveTo(fx, baseY + w * 0.35, fx - w / 2, baseY);
+          const g = ctx.createLinearGradient(0, baseY, 0, tipY);
+          g.addColorStop(0, L.inner);
+          g.addColorStop(0.55, L.inner);
+          g.addColorStop(1, L.outer);
+          ctx.fillStyle = g;
+          ctx.fill();
+        });
+      });
+
+      // sparks rising from across the whole fire bed
+      const sparkCount = 9;
+      const period = 1300;
+      for (let i = 0; i < sparkCount; i++) {
+        const offset = (i / sparkCount) * period + seed * 5000;
+        const localT = ((timeMs + offset) % period) / period;
+        const startX = cx + Math.sin(i * 12.9 + seed * 5) * r * 0.38;
+        const px = startX + Math.sin(localT * Math.PI * 2 + i * 1.7) * r * 0.08;
+        const py = baseY - r * 0.25 - localT * r * 1.0;
+        const alpha = Math.sin(localT * Math.PI) * (1 - localT * 0.4);
+        ctx.beginPath();
+        ctx.arc(px, py, Math.max(0.5, r * 0.04 * (1 - localT * 0.5)), 0, Math.PI * 2);
+        ctx.fillStyle = localT < 0.5 ? `rgba(255, 230, 150, ${alpha})` : `rgba(255, 130, 60, ${alpha})`;
         ctx.fill();
       }
+      ctx.restore();
     },
 
     // water (blue) — fills ~2/3 of the bubble, surface gently sloshing,

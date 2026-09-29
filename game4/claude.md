@@ -258,9 +258,12 @@ live; `render.js` asks it for "how do I draw color X" and nothing else.
   highlight that gently drifts plus a smaller secondary glint, and animated
   symbols inside, seen through the wobbly membrane itself (the interior clip
   follows the same live outline) —
-  - **Fire (red):** a stream of small rising ember particles (not a single
-    solid flame shape) — color-shifts hot white/yellow near the base to
-    orange to smoky red as each ember rises and fades, over a warm glow
+  - **Fire (red):** a small, broad campfire (not a single stream of
+    fire) — two crossed logs with end-grain caps, a wide flickering ground
+    glow, five independently flickering flame tongues across the width
+    (tallest in the center, each layered red → orange → small pale core,
+    kept red-dominant so it never reads as Star's yellow at cell size),
+    and sparks drifting up from the whole fire bed
   - **Water (blue):** the bubble fills to roughly 2/3 with a gently sloshing
     water level, with small bubbles rising up to the surface and vanishing there
   - **Life (green):** drifting firefly particles, each with a soft glow
