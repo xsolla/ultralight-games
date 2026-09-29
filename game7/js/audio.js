@@ -9,7 +9,10 @@
 //
 // A TRACK IS A SLOT. The run's tracks take slots 0..RUN_SRCS.length-1 and the
 // title takes TITLE_TRACK after them, so switchTo() never learns which kind it
-// is holding. A run rotates through its tracks, one per wave break.
+// is holding. A run's tracks don't loop: each plays once, and when it ends a
+// different one (never the one that just played) is chosen at random and
+// takes over. Nothing about a run's music depends on what is happening in the
+// game.
 //
 // AN SFX IS AN EVENT, not a file. Callers name what happened ('uiClick',
 // 'shipLaunched') and never a path.
@@ -25,7 +28,7 @@
 // ---- Tunable audio knobs ---------------------------------------------------
 const AUDIO = {
   TITLE_SRC: 'assets/bgm/bgm_title.mp3',
-  RUN_SRCS: ['assets/bgm/bgm_ship1.mp3', 'assets/bgm/bgm_ship2.mp3', 'assets/bgm/bgm_ship3.mp3'],
+  RUN_SRCS: ['assets/bgm/bgm_battle1.mp3', 'assets/bgm/bgm_battle2.mp3', 'assets/bgm/bgm_battle3.mp3'],
   VOLUME: 0.45,        // music level, 0..1 — under the game, not over it
   FADE_MS: 3000,       // ms for the run's music to leave when the title returns
   CROSSFADE_MS: 2000,  // ms for every other swap: old track out, new one in
@@ -123,6 +126,15 @@ function pickVariant(pool) {
   return v;
 }
 
+// A random index in [0, n), never `exclude`. Same shape as pickVariant, used
+// for the run's music track rotation.
+function pickOtherTrack(n, exclude) {
+  if (n < 2) return 0;
+  let v = Math.floor(Math.random() * (n - 1));
+  if (v >= exclude) v++;
+  return v;
+}
+
 const Sound = {
   tracks: [],       // slot -> HTMLAudioElement, or null if it wouldn't build
   current: -1,      // slot owning playback, or -1 for silence — also the record
@@ -143,12 +155,15 @@ const Sound = {
   ensureTracks() {
     if (this.tracks.length || typeof Audio === 'undefined') return;
     const srcs = AUDIO.RUN_SRCS.concat(AUDIO.TITLE_SRC);
-    this.tracks = srcs.map((src) => {
+    this.tracks = srcs.map((src, i) => {
       try {
         const a = new Audio(src);
-        a.loop = true;
+        // The title loops forever; a run track plays once and hands off to
+        // onRunTrackEnded, which picks the next one.
+        a.loop = (i === TITLE_TRACK);
         a.preload = 'none';
         a.volume = AUDIO.VOLUME;
+        if (i !== TITLE_TRACK) a.addEventListener('ended', () => this.onRunTrackEnded(i));
         return a;
       } catch (e) {
         return null;
@@ -220,20 +235,23 @@ const Sound = {
   },
 
   // ---- Public entry points -------------------------------------------------
-  // A run begins on its first track. Anything still sounding (the title) is
+  // A run begins on a random track. Anything still sounding (the title) is
   // crossed into rather than cut.
   startMusic() {
     this.inRun = true;
-    this.runTrack = 0;
-    this.switchTo(0, this.sounding() ? AUDIO.CROSSFADE_MS : 0);
+    this.runTrack = Math.floor(Math.random() * AUDIO.RUN_SRCS.length);
+    this.switchTo(this.runTrack, this.sounding() ? AUDIO.CROSSFADE_MS : 0);
     for (let i = 0; i < AUDIO.RUN_SRCS.length; i++) this.warm(i);
   },
 
-  // A wave was cleared: move the run on to its next track (§10's rotation).
-  nextRunTrack() {
-    if (!this.inRun) return;
-    this.runTrack = (this.runTrack + 1) % AUDIO.RUN_SRCS.length;
-    this.switchTo(this.runTrack, AUDIO.CROSSFADE_MS);
+  // A run track reached its natural end (it doesn't loop): hand off to a
+  // different one, chosen at random, never repeating the track that just
+  // finished. Guarded against stale events from a track that was cut short
+  // (e.g. the run ended) rather than left to finish.
+  onRunTrackEnded(i) {
+    if (!this.inRun || this.current !== i) return;
+    this.runTrack = pickOtherTrack(AUDIO.RUN_SRCS.length, i);
+    this.switchTo(this.runTrack, 0);
   },
 
   // The title screen is up: at page load, and again when a run hands back to

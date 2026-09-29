@@ -250,7 +250,9 @@ const Game = {
     if (hud) return 'hud:' + hud;
     if (this.screen === 'menu') {
       const b = menuButtonAt(x, y);
-      return b ? 'menu:' + b : null;
+      if (b) return 'menu:' + b;
+      const pt = planetButtonAt(x, y);
+      return pt ? 'ptype:' + pt : null;
     }
     if (this.screen === 'records') {
       const b = recordsButtonAt(x, y, this.recordsFrom);
@@ -277,7 +279,9 @@ const Game = {
     if (hud) { this.pressHudButton(hud); return; }
     if (this.screen === 'menu') {
       const b = menuButtonAt(x, y);
-      if (b) this.pressMenuButton(b);
+      if (b) { this.pressMenuButton(b); return; }
+      const pt = planetButtonAt(x, y);
+      if (pt) this.pressPlanetButton(pt);
       return;
     }
     if (this.screen === 'records') {
@@ -379,6 +383,13 @@ const Game = {
     else if (id === 'records') this.openRecords('menu');
   },
 
+  // The planet-type row: Planet is the same instance the run draws, so this
+  // is the only place the choice needs to be applied.
+  pressPlanetButton(key) {
+    Sound.play('uiClick');
+    Planet.setPalette(key);
+  },
+
   // 'retry' starts another run; 'title' and 'ok' are the same destination
   // wearing the label its context calls for.
   pressRecordsButton(id) {
@@ -457,7 +468,6 @@ const Game = {
         Sound.play(this.waves.wave % WAVES.BIG_EVERY === 0 ? 'waveStartBig' : 'waveStart');
       } else if (w === 'waveClear') {
         Sound.play('waveCleared');
-        Sound.nextRunTrack();
       }
       const done = updateShipyard(this.yard, dt);
       if (done) {

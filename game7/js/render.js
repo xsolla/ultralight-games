@@ -389,7 +389,12 @@ function shipRadius(s) {
 // bar, because a busy wave shows a hundred of them.
 function drawHpBars(ctx, game) {
   const bars = [];
-  const bar = (x, top, w, f, a) => bars.push({ x: x - w / 2, y: top - HP_BAR.GAP - HP_BAR.H, w, f, a });
+  // Narrowed to "damaged only" (CLAUDE.md §7.11, 2026-09-25): a full-HP entity
+  // draws no bar at all, so the track never clutters a healthy fleet.
+  const bar = (x, top, w, f, a) => {
+    if (f >= 1) return;
+    bars.push({ x: x - w / 2, y: top - HP_BAR.GAP - HP_BAR.H, w, f, a });
+  };
   for (const s of game.ships) {
     if (s.dead) continue;
     bar(s.x, s.y - shipRadius(s), Math.max(HP_BAR.MIN_W, s.dispW), s.hp / s.maxHp,
@@ -403,8 +408,11 @@ function drawHpBars(ctx, game) {
     if (m.dead) continue;
     bar(m.x, m.y - m.r, Math.max(HP_BAR.MIN_W, m.dispW * 0.7), m.hp / m.maxHp, 1);
   }
-  bars.push({ x: PLANET_CX - HP_BAR.PLANET_W / 2, y: HP_BAR.PLANET_Y, w: HP_BAR.PLANET_W,
-              f: game.planetHp / PLANET.HP, a: Planet.fade });
+  const planetFrac = game.planetHp / PLANET.HP;
+  if (planetFrac < 1) {
+    bars.push({ x: PLANET_CX - HP_BAR.PLANET_W / 2, y: HP_BAR.PLANET_Y, w: HP_BAR.PLANET_W,
+                f: planetFrac, a: Planet.fade });
+  }
 
   ctx.save();
   ctx.fillStyle = COLORS.hpTrack;

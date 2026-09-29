@@ -7,6 +7,10 @@
 // ---- Tunables --------------------------------------------------------------
 const METEOR_SPIN     = [8, 30];      // deg/s, either direction
 const METEOR_FRAME_MS = [110, 170];   // the brightening pulse's cadence
+// METEOR_TYPES[].speed (CLAUDE.md §9) read too slow in playtests; each meteor
+// rolls its own multiplier in this range at spawn so a wave's meteors don't
+// all move in lockstep (designer, 2026-09-25).
+const METEOR_SPEED_MULT = [2, 3];
 
 function spawnMeteor(list, t, wave) {
   const type = METEOR_TYPES[t];
@@ -14,11 +18,12 @@ function spawnMeteor(list, t, wave) {
   const en = rollEntry(dispW / 2);
   const x1 = randRange(EXIT_X), y1 = planetSurfaceY(x1);
   const dx = x1 - en.x, dy = y1 - en.y, d = Math.hypot(dx, dy);
+  const speed = type.speed * randRange(METEOR_SPEED_MULT);
   list.push({
     kind: 'meteor',
     t, wave,
     x: en.x, y: en.y,
-    vx: dx / d * type.speed, vy: dy / d * type.speed,
+    vx: dx / d * speed, vy: dy / d * speed,
     hp: type.hp, maxHp: type.hp,
     dispW,
     r: SpriteKit.asteroidHitRadius(dispW),

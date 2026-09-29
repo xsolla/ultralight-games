@@ -6,7 +6,11 @@
 // state — the planet's HP lives on Game and arrives as an argument.
 //
 // Ported from planet_test.html, which stays the look-development reference.
-// Only the look the designer chose is kept here: soft style, Terran palette.
+// Only the soft style is kept here — the designer's chosen look. All four of
+// the test page's palettes (Terran/Desert/Glacier/Alien) are carried over
+// too, since the title screen lets the player switch between them
+// (menu.js's planet-type row, settled 2026-09-25); the run keeps whichever
+// one was showing, because Planet is the one instance both screens draw.
 //
 // Everything is file://-safe: pixels are WRITTEN into offscreen canvases with
 // putImageData and never read back.
@@ -32,17 +36,57 @@ const Planet = (function () {
     CLOUD_DRIFT: 0.8,      // degrees of arc per second
   };
 
-  // Terran. Colour stops are [position, [r,g,b]]; `sea` is the height threshold
-  // between ocean and land in fBm units (roughly -0.7..0.7).
-  const PAL = {
-    sea: 0.04, landLo: 0.04, landHi: 0.62,
-    ocean: [[0, [46, 136, 172]], [0.2, [22, 84, 136]], [1, [7, 26, 62]]],
-    land: [[0, [198, 184, 134]], [0.06, [88, 140, 66]], [0.3, [46, 100, 55]], [0.55, [112, 104, 70]],
-           [0.74, [136, 126, 116]], [0.88, [234, 240, 246]]],
-    dry: [178, 152, 98],
-    cloud: [250, 252, 255], cloudShade: [192, 208, 230],
-    atmo: [92, 172, 255], sunset: [255, 136, 76], night: [3, 6, 18], city: '255, 196, 118',
+  // The four palettes from planet_test.html. Colour stops are [position,
+  // [r,g,b]]; `sea` is the height threshold between ocean and land in fBm
+  // units (roughly -0.7..0.7); `cover` is that palette's own cloud-cover
+  // default, applied whenever it's picked (test page: choosing a palette
+  // also resets the cover slider to this value).
+  const PALETTES = {
+    terran: {
+      sea: 0.04, landLo: 0.04, landHi: 0.62,
+      ocean: [[0, [46, 136, 172]], [0.2, [22, 84, 136]], [1, [7, 26, 62]]],
+      land: [[0, [198, 184, 134]], [0.06, [88, 140, 66]], [0.3, [46, 100, 55]], [0.55, [112, 104, 70]],
+             [0.74, [136, 126, 116]], [0.88, [234, 240, 246]]],
+      dry: [178, 152, 98],
+      cloud: [250, 252, 255], cloudShade: [192, 208, 230], cover: 0.6,
+      atmo: [92, 172, 255], sunset: [255, 136, 76], night: [3, 6, 18], city: [255, 196, 118],
+    },
+    desert: {
+      sea: -9, landLo: -0.55, landHi: 0.55,
+      ocean: [[0, [0, 0, 0]], [1, [0, 0, 0]]],
+      land: [[0, [80, 30, 20]], [0.28, [134, 56, 32]], [0.52, [186, 94, 52]], [0.72, [216, 142, 88]],
+             [0.88, [240, 202, 158]]],
+      dry: null,
+      cloud: [248, 218, 190], cloudShade: [206, 160, 130], cover: 0.18,
+      atmo: [255, 162, 122], sunset: [140, 176, 255], night: [10, 4, 4], city: [255, 220, 170],
+    },
+    glacier: {
+      sea: 0.08, landLo: 0.08, landHi: 0.6,
+      ocean: [[0, [54, 112, 152]], [0.25, [28, 72, 112]], [1, [10, 28, 54]]],
+      land: [[0, [150, 186, 210]], [0.2, [186, 214, 232]], [0.5, [220, 236, 248]], [0.8, [248, 252, 255]]],
+      dry: null,
+      cloud: [242, 248, 255], cloudShade: [188, 212, 236], cover: 0.55,
+      atmo: [140, 226, 255], sunset: [255, 160, 208], night: [4, 10, 22], city: [180, 230, 255],
+    },
+    alien: {
+      sea: -0.04, landLo: -0.04, landHi: 0.6,
+      ocean: [[0, [124, 50, 164]], [0.25, [72, 24, 112]], [1, [24, 8, 44]]],
+      land: [[0, [46, 172, 142]], [0.2, [30, 120, 104]], [0.5, [112, 186, 90]], [0.78, [202, 228, 122]]],
+      dry: [156, 92, 172],
+      cloud: [234, 216, 255], cloudShade: [168, 148, 210], cover: 0.45,
+      atmo: [196, 112, 255], sunset: [110, 255, 200], night: [8, 3, 18], city: [140, 255, 220],
+    },
   };
+  // Display order and labels for the title screen's planet-type row
+  // (menu.js). The colour data above stays this module's own; menu.js only
+  // ever sees this list and the key it hands back to setPalette().
+  const PALETTE_LIST = [
+    { key: 'terran', label: 'TERRAN' },
+    { key: 'desert', label: 'DESERT' },
+    { key: 'glacier', label: 'GLACIER' },
+    { key: 'alien', label: 'ALIEN' },
+  ];
+  let PAL = PALETTES.terran;   // the palette in use; setPalette() swaps it
 
   // ---- Cost control --------------------------------------------------------------
   const MAX_SCALE   = 2;      // device px per logical px the layers are built at, at most
@@ -227,7 +271,7 @@ const Planet = (function () {
       rgx: new Float32Array(N), rgy: new Float32Array(N), city: new Float32Array(N),
     };
     const C = [0, 0, 0], O = [0, 0, 0];
-    const cityRGB = PAL.city.split(',').map(Number);
+    const cityRGB = PAL.city;
 
     // Colours that never change per pixel: shade is always night-tinted black and
     // lights always city-coloured; the sun pass only writes their alpha.
@@ -274,7 +318,7 @@ const Planet = (function () {
         if (land) {
           const t = (h - PAL.landLo) / (PAL.landHi - PAL.landLo);
           ramp(PAL.land, t, C);
-          if (t < 0.42) {
+          if (PAL.dry && t < 0.42) {
             const m = noise2(u / 240 + 51.7, v / 240 - 13.3);
             mixInto(C, PAL.dry, ss(0.1, 0.42, m) * (1 - t / 0.42));
           }
@@ -543,9 +587,26 @@ const Planet = (function () {
     fade: 0,          // 0 -> 1 once the first layers exist
     t: 0,             // own clock, ms, for the damage effects
     impacts: [],      // strikes being shown: { th (angle on the limb), t0 }
+    paletteKey: 'terran',   // which of `palettes` PAL currently is
+    palettes: PALETTE_LIST, // read-only, for menu.js's planet-type row
 
     init() {
       seedNoise(LOOK.SEED);
+    },
+
+    // The title screen's planet-type row chose a different look. Rebuilds in
+    // the background exactly like a resize (below): the old layers keep
+    // drawing until the new ones are lit, so the swap never blanks the
+    // screen. The run keeps whatever was chosen, since this Planet instance
+    // is the same one a run draws (CLAUDE.md §6).
+    setPalette(key) {
+      const pal = PALETTES[key];
+      if (!pal || key === this.paletteKey) return;
+      PAL = pal;
+      LOOK.CLOUD_COVER = pal.cover;
+      this.paletteKey = key;
+      this.job = buildAll(this.kk || MAX_SCALE, () => this.sunVector());
+      this.pass = null;
     },
 
     // A body reached the planet at (x, y). Purely visual: the HP is Game's.
