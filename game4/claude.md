@@ -290,7 +290,13 @@ live; `render.js` asks it for "how do I draw color X" and nothing else.
 - **Background ambiance** (`js/ambiance.js`, implemented): soft drifting
   bokeh motes in the 6 token hues, behind the well(s) and the menu — a fixed
   layout of motes that just drift/pulse from their own seed over time, no
-  per-frame simulation state
+  per-frame simulation state. **Title screen only:** a lifted deep-indigo
+  backdrop (`Renderer.drawMenuBackground`, gameplay screens keep the
+  near-black one) so it stays visible in a lit room, stronger motes, and
+  `Ambiance.drawFloatingTiles` — large (72–128px, bigger than in-game
+  cells) softly blurred live tokens from all 4 tilesets slowly rising,
+  swaying and tilting behind the menu (rendered low-res offscreen + a
+  `ctx.filter` blur where supported)
 - **HUD panels** (stats/next): a colored gradient accent stripe across the
   top of each panel (clipped to its own rounded corners), small hand-drawn
   icons next to SCORE/SPEED (sparkle, bolt), and — for variety — a row of
@@ -418,7 +424,11 @@ mouse it is multi-touch and **side-aware**:
     Architecture.
   - **Title screen** (`js/menu.js`): mode picker (Single Player and
     Multiplayer both enabled), token-variety picker (4/5/6), tileset picker,
-    Play (click or Enter/Space). A "How To Play" button (bottom-right)
+    Play (click or Enter/Space). Section labels are large, letter-spaced,
+    with a tight bright outer glow; all three picker rows share one 64px
+    button height, tileset buttons are 64×64 icon-only squares matching
+    the variety buttons, and the selected tileset's name is shown as a
+    live caption under that row. A "How To Play" button (bottom-right)
     opens a 2-page popup — controls, then a visual explainer of
     row/column/diagonal matching — navigable by click, Prev/Next, Escape,
     or arrow keys.
@@ -428,7 +438,10 @@ mouse it is multi-touch and **side-aware**:
     to a fixed 1-6 pip count, a rendering-only choice that rules.js/board.js
     never see).
   - **Single Player:** playable end-to-end — 5×13 well centered on screen,
-    stats panel (left) + next-piece preview (right), 1×3 piece
+    stats panel (left) + next-piece preview (right), a glowing "CASCADIA"
+    wordmark top-left (`Renderer.drawGameTitle`, mirroring the HUD button
+    row's inset; top-center in Multiplayer, where the P1 caption sits
+    top-left), 1×3 piece
     spawn/move/cycle/fall/hard-drop, full chain-resolve with a real timed
     cascade (flash → explode/particles → gravity-fall → rescan, matching
     row/column/diagonal runs), scoring formula. Game-over is a proper
@@ -479,7 +492,9 @@ mouse it is multi-touch and **side-aware**:
     Two icon-only HUD buttons sit top-right on both gameplay screens: an
     audio-mode toggle cycling On → Music Off → All Off → On (speaker icon
     changes glyph per mode) and an Exit button that returns to the title
-    screen immediately.
+    screen immediately. The title screen carries the same Fullscreen and
+    audio-mode buttons (no Exit), flush with the same right margin; toggling
+    audio there never starts music.
 - **Pending:** a scoreboard view on the title screen itself
   (data/persistence exists, just not shown there yet), on-screen buttons for
   the 5 piece actions (move/cycle/drop), and the lock-squash animation noted

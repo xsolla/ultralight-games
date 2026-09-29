@@ -134,6 +134,56 @@ const Renderer = {
     ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
   },
 
+  // Title screen only: a clearly lifted deep-indigo stage (the gameplay
+  // screens keep the near-black one above) so the backdrop stays visible
+  // in a well-lit room, with a soft center glow behind the menu column.
+  drawMenuBackground(ctx) {
+    const grad = ctx.createLinearGradient(0, 0, 0, CANVAS_H);
+    grad.addColorStop(0, '#232a45');
+    grad.addColorStop(0.55, '#171b2f');
+    grad.addColorStop(1, '#0d0f1c');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
+
+    const glow = ctx.createRadialGradient(
+      CANVAS_W / 2, CANVAS_H * 0.4, 0,
+      CANVAS_W / 2, CANVAS_H * 0.4, CANVAS_W * 0.55
+    );
+    glow.addColorStop(0, 'rgba(90, 120, 220, 0.18)');
+    glow.addColorStop(1, 'rgba(90, 120, 220, 0)');
+    ctx.fillStyle = glow;
+    ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
+
+    const vignette = ctx.createRadialGradient(
+      CANVAS_W / 2, CANVAS_H * 0.45, CANVAS_H * 0.3,
+      CANVAS_W / 2, CANVAS_H * 0.5, CANVAS_W * 0.75
+    );
+    vignette.addColorStop(0, 'rgba(0, 0, 0, 0)');
+    vignette.addColorStop(1, 'rgba(0, 0, 0, 0.35)');
+    ctx.fillStyle = vignette;
+    ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
+  },
+
+  // Game name on the gameplay screens, vertically centered on the HUD
+  // icon-button row: top-left in Single Player (mirroring that row's
+  // inset), top-center in Multiplayer (between the two wells).
+  // shadowBlur ignores the logical transform, so it's scaled to device px.
+  drawGameTitle(ctx, x, centerY, align) {
+    const scale = ctx.getTransform ? ctx.getTransform().a : 1;
+    ctx.save();
+    ctx.textAlign = align || 'left';
+    ctx.textBaseline = 'middle';
+    ctx.font = 'bold 24px system-ui, sans-serif';
+    ctx.letterSpacing = '4px';
+    ctx.fillStyle = '#eef3ff';
+    ctx.shadowColor = 'rgba(120, 170, 255, 0.85)';
+    ctx.shadowBlur = 8 * scale;
+    ctx.fillText('CASCADIA', x, centerY);
+    ctx.shadowBlur = 3 * scale;
+    ctx.fillText('CASCADIA', x, centerY);
+    ctx.restore();
+  },
+
   drawWell(ctx, layout, pixelRatio) {
     const tray = this.ensureTrayCache(layout, pixelRatio);
     const pad = 20;
@@ -427,8 +477,10 @@ const Renderer = {
       (c, x, y, s) => this.drawFullscreenIcon(c, x, y, s, fullscreen));
     this.drawHudIconButton(ctx, hud.audioBtn.rect, hudHover === 'audio',
       (c, x, y, s) => this.drawSpeakerIcon(c, x, y, s, audioMode));
-    this.drawHudIconButton(ctx, hud.exitBtn.rect, hudHover === 'exit',
-      (c, x, y, s) => this.drawExitIcon(c, x, y, s));
+    if (hud.exitBtn) { // absent on the title screen
+      this.drawHudIconButton(ctx, hud.exitBtn.rect, hudHover === 'exit',
+        (c, x, y, s) => this.drawExitIcon(c, x, y, s));
+    }
   },
 
   // Small row of dots in the match's actual active colors — shows what's

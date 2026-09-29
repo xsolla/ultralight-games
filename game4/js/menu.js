@@ -30,10 +30,14 @@ const Menu = {
   getLayout() {
     if (this._layout) return this._layout;
 
-    const modeBtnW = 260, modeBtnH = 54, modeGap = 20;
+    // Mode, variety and tileset rows all share one button height (and
+    // variety/tileset one square size) so the three pickers read as a set.
+    const rowH = 64;
+
+    const modeBtnW = 260, modeBtnH = rowH, modeGap = 20;
     const modeRowW = modeBtnW * 2 + modeGap;
     const modeX = (CANVAS_W - modeRowW) / 2;
-    const modeY = 114;
+    const modeY = 124;
     const modeButtons = [
       { id: 'mode-single', kind: 'mode', value: 'single', label: 'SINGLE PLAYER', disabled: false,
         rect: { x: modeX, y: modeY, w: modeBtnW, h: modeBtnH } },
@@ -41,8 +45,8 @@ const Menu = {
         rect: { x: modeX + modeBtnW + modeGap, y: modeY, w: modeBtnW, h: modeBtnH } },
     ];
 
-    const varBtnSize = 64, varGap = 18;
-    const varietyY = 224;
+    const varBtnSize = rowH, varGap = 18;
+    const varietyY = 244;
     const varietyRowW = TOKEN_VARIETY.OPTIONS.length * varBtnSize + (TOKEN_VARIETY.OPTIONS.length - 1) * varGap;
     const varietyX = (CANVAS_W - varietyRowW) / 2;
     const varietyButtons = TOKEN_VARIETY.OPTIONS.map((v, i) => ({
@@ -50,8 +54,8 @@ const Menu = {
       rect: { x: varietyX + i * (varBtnSize + varGap), y: varietyY, w: varBtnSize, h: varBtnSize },
     }));
 
-    const tileBtnW = 160, tileBtnH = 120, tileGap = 18;
-    const tilesetY = 346;
+    const tileBtnW = rowH, tileBtnH = rowH, tileGap = varGap;
+    const tilesetY = 364;
     const tilesetRowW = this.TILESET_INFO.length * tileBtnW + (this.TILESET_INFO.length - 1) * tileGap;
     const tilesetX = (CANVAS_W - tilesetRowW) / 2;
     const tilesetButtons = this.TILESET_INFO.map((t, i) => ({
@@ -62,8 +66,11 @@ const Menu = {
     const playW = 220, playH = 58;
     const playButton = {
       id: 'play', kind: 'play', value: null, label: 'PLAY', disabled: false,
-      rect: { x: (CANVAS_W - playW) / 2, y: 504, w: playW, h: playH },
+      rect: { x: (CANVAS_W - playW) / 2, y: 500, w: playW, h: playH },
     };
+
+    // Name of the currently selected tileset, shown under the tileset row.
+    const tilesetNameY = tilesetY + tileBtnH + 32;
 
     const howToBtnW = 116, howToBtnH = 40, howToMargin = 18;
     const howToButton = {
@@ -75,7 +82,10 @@ const Menu = {
       },
     };
 
-    this._layout = { modeButtons, varietyButtons, tilesetButtons, playButton, howToButton };
+    this._layout = {
+      modeButtons, varietyButtons, tilesetButtons, playButton, howToButton, tilesetNameY,
+      labels: { mode: modeY - 20, variety: varietyY - 20, tileset: tilesetY - 20 },
+    };
     return this._layout;
   },
 
@@ -157,8 +167,9 @@ const Menu = {
   render(ctx, timeMs) {
     const layout = this.getLayout();
 
-    Renderer.drawBackground(ctx);
-    Ambiance.draw(ctx, timeMs);
+    Renderer.drawMenuBackground(ctx);
+    Ambiance.draw(ctx, timeMs, 2.2);
+    Ambiance.drawFloatingTiles(ctx, timeMs);
 
     // Xsolla wordmark, top-left. Mirrors the HUD button column on the right,
     // which sits at the same 28px inset and the same y.
@@ -169,14 +180,15 @@ const Menu = {
     ctx.font = 'bold 40px system-ui, sans-serif';
     ctx.fillText('CASCADIA', CANVAS_W / 2, 60);
 
-    this.drawSectionLabel(ctx, 'MODE', 98);
+    this.drawSectionLabel(ctx, 'MODE', layout.labels.mode);
     layout.modeButtons.forEach((b) => this.drawFlatButton(ctx, b, b.value === this.selectedMode));
 
-    this.drawSectionLabel(ctx, 'TOKEN VARIETY', 208);
+    this.drawSectionLabel(ctx, 'TOKEN VARIETY', layout.labels.variety);
     layout.varietyButtons.forEach((b) => this.drawVarietyButton(ctx, b));
 
-    this.drawSectionLabel(ctx, 'TILESET', 332);
+    this.drawSectionLabel(ctx, 'TILESET', layout.labels.tileset);
     layout.tilesetButtons.forEach((b) => this.drawTilesetButton(ctx, b, timeMs));
+    this.drawTilesetName(ctx, layout.tilesetNameY);
 
     this.drawFlatButton(ctx, layout.playButton, false, true);
 
@@ -380,12 +392,41 @@ const Menu = {
     ctx.restore();
   },
 
+  // shadowBlur is measured in backing-store pixels and ignores the logical
+  // 800x600 transform, so scale it by the current device scale to keep the
+  // glow the same apparent size at any canvas resolution.
+  glowBlur(ctx, logicalPx) {
+    return logicalPx * (ctx.getTransform ? ctx.getTransform().a : 1);
+  },
+
+  // Section headings: larger, letter-spaced, with a bright but tight outer
+  // glow (two stacked shadow passes) so they read clearly over the backdrop.
   drawSectionLabel(ctx, text, y) {
     ctx.save();
     ctx.textAlign = 'center';
-    ctx.fillStyle = '#5b6272';
-    ctx.font = 'bold 12px system-ui, sans-serif';
+    ctx.font = 'bold 17px system-ui, sans-serif';
+    ctx.letterSpacing = '3px';
+    ctx.fillStyle = '#e4ecff';
+    ctx.shadowColor = 'rgba(120, 170, 255, 0.95)';
+    ctx.shadowBlur = this.glowBlur(ctx, 7);
     ctx.fillText(text, CANVAS_W / 2, y);
+    ctx.shadowBlur = this.glowBlur(ctx, 3);
+    ctx.fillText(text, CANVAS_W / 2, y);
+    ctx.restore();
+  },
+
+  // Live caption for the tileset row — follows the current selection.
+  drawTilesetName(ctx, y) {
+    const info = this.TILESET_INFO.find((t) => t.id === this.selectedTileset);
+    if (!info) return;
+    ctx.save();
+    ctx.textAlign = 'center';
+    ctx.font = 'bold 20px system-ui, sans-serif';
+    ctx.letterSpacing = '1px';
+    ctx.fillStyle = '#ffffff';
+    ctx.shadowColor = 'rgba(79, 140, 255, 0.8)';
+    ctx.shadowBlur = this.glowBlur(ctx, 6);
+    ctx.fillText(info.label, CANVAS_W / 2, y);
     ctx.restore();
   },
 
@@ -449,29 +490,18 @@ const Menu = {
     const r = b.rect;
     const selected = !b.disabled && b.value === this.selectedTileset;
     ctx.save();
-    Renderer.roundRect(ctx, r.x, r.y, r.w, r.h, 12);
+    Renderer.roundRect(ctx, r.x, r.y, r.w, r.h, 10);
     ctx.fillStyle = b.disabled
       ? 'rgba(255, 255, 255, 0.03)'
-      : selected ? 'rgba(79, 140, 255, 0.18)' : 'rgba(255, 255, 255, 0.05)';
+      : selected ? 'rgba(79, 140, 255, 0.22)' : 'rgba(255, 255, 255, 0.05)';
     ctx.fill();
     ctx.lineWidth = selected ? 2 : 1;
     ctx.strokeStyle = selected ? 'rgba(79, 140, 255, 0.85)' : 'rgba(255, 255, 255, 0.1)';
     ctx.stroke();
 
+    // icon only — the selected tileset's name is drawn under the row
     if (b.disabled) ctx.globalAlpha = 0.4;
-    this.drawTilesetIcon(ctx, b.value, r.x + r.w / 2, r.y + 44, 34, timeMs);
-    ctx.globalAlpha = 1;
-
-    ctx.textAlign = 'center';
-    ctx.fillStyle = b.disabled ? '#5b6272' : '#e7eaf2';
-    ctx.font = 'bold 13px system-ui, sans-serif';
-    ctx.fillText(b.label, r.x + r.w / 2, r.y + r.h - 28);
-
-    if (b.disabled) {
-      ctx.font = '9px system-ui, sans-serif';
-      ctx.fillStyle = '#7d8798';
-      ctx.fillText('SOON', r.x + r.w / 2, r.y + r.h - 12);
-    }
+    this.drawTilesetIcon(ctx, b.value, r.x + r.w / 2, r.y + r.h / 2, r.w * 0.62, timeMs);
     ctx.restore();
   },
 

@@ -24,7 +24,7 @@ const COLORS = {
 
 const WELL = { COLS: 5, ROWS: 13 };
 
-const TOKEN_VARIETY = { OPTIONS: [4, 5, 6], DEFAULT: 6 };
+const TOKEN_VARIETY = { OPTIONS: [4, 5, 6], DEFAULT: 4 };
 
 const PIECE = {
   LENGTH: 3,

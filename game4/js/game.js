@@ -490,12 +490,11 @@ const Game = {
     };
   },
 
-  // HUD buttons live on the gameplay screens only, but stay active above the
-  // game-over/win dialogs — so hover is tracked for the whole screen.
+  // HUD buttons live on the gameplay screens and the title screen, and stay
+  // active above dialogs/popups — so hover is tracked for the whole screen.
   handleMouseMove(e) {
-    const onGameplay = this.screen === 'single' || this.screen === 'multiplayer';
     const p = this.eventToCanvas(e);
-    this.hudHover = onGameplay ? this.hudButtonAt(p.x, p.y) : null;
+    this.hudHover = this.hudButtonAt(p.x, p.y);
     const cursor = this.hudHover ? 'pointer' : 'default';
     if (this.canvas.style.cursor !== cursor) this.canvas.style.cursor = cursor;
   },
@@ -512,11 +511,11 @@ const Game = {
   // targets. Menu owns its own layout and hit-testing; the dialogs' small
   // button sets are handled right here.
   dispatchTap(x, y) {
-    if (this.screen === 'menu') { Menu.handleClick(x, y); return; }
+    // HUD icon buttons sit above everything (including dialogs and the
+    // How To popup), same top-right spot on every screen — checked first.
+    if (this.handleHudClick(x, y)) return;
 
-    // HUD icon buttons sit above everything (including dialogs), same
-    // top-right spot on both gameplay screens — checked first every click.
-    if ((this.screen === 'single' || this.screen === 'multiplayer') && this.handleHudClick(x, y)) return;
+    if (this.screen === 'menu') { Menu.handleClick(x, y); return; }
 
     if (this.screen === 'single' && this.sp.toppedOut) {
       const gl = this.getGameOverLayout();
@@ -560,10 +559,28 @@ const Game = {
     return this._hudLayout;
   },
 
-  handleHudClick(x, y) {
+  // Title screen gets the same buttons minus Exit, so the pair shifts one
+  // slot right to keep the row flush with the same right margin.
+  _menuHudLayout: null,
+  getMenuHudLayout() {
+    if (this._menuHudLayout) return this._menuHudLayout;
     const hud = this.getHudLayout();
+    this._menuHudLayout = { fullscreenBtn: hud.audioBtn, audioBtn: hud.exitBtn };
+    return this._menuHudLayout;
+  },
+
+  // HUD layout for the current screen, or null where there is none.
+  currentHudLayout() {
+    if (this.screen === 'menu') return this.getMenuHudLayout();
+    if (this.screen === 'single' || this.screen === 'multiplayer') return this.getHudLayout();
+    return null;
+  },
+
+  handleHudClick(x, y) {
+    const hud = this.currentHudLayout();
+    if (!hud) return false;
     if (this.hitTest(x, y, hud.audioBtn.rect)) { this.cycleAudioMode(); return true; }
-    if (this.hitTest(x, y, hud.exitBtn.rect)) { this.goToMenu(); return true; }
+    if (hud.exitBtn && this.hitTest(x, y, hud.exitBtn.rect)) { this.goToMenu(); return true; }
     if (this.hitTest(x, y, hud.fullscreenBtn.rect)) {
       Sound.play('ui_click');
       this.toggleFullscreen();
@@ -574,9 +591,10 @@ const Game = {
 
   // Which HUD icon button, if any, is under the given logical-space point.
   hudButtonAt(x, y) {
-    const hud = this.getHudLayout();
+    const hud = this.currentHudLayout();
+    if (!hud) return null;
     if (this.hitTest(x, y, hud.audioBtn.rect)) return 'audio';
-    if (this.hitTest(x, y, hud.exitBtn.rect)) return 'exit';
+    if (hud.exitBtn && this.hitTest(x, y, hud.exitBtn.rect)) return 'exit';
     if (this.hitTest(x, y, hud.fullscreenBtn.rect)) return 'fullscreen';
     return null;
   },
@@ -608,7 +626,8 @@ const Game = {
   cycleAudioMode() {
     const order = ['on', 'music-off', 'off'];
     const next = order[(order.indexOf(Sound.mode) + 1) % order.length];
-    Sound.setMode(next, this.currentTilesetId);
+    // no music on the title screen, so never start a track from there
+    Sound.setMode(next, this.screen === 'menu' ? null : this.currentTilesetId);
     Sound.play('ui_click');
   },
 
@@ -932,7 +951,11 @@ const Game = {
 
   render() {
     const ctx = this.ctx;
-    if (this.screen === 'menu') { Menu.render(ctx, this.time); return; }
+    if (this.screen === 'menu') {
+      Menu.render(ctx, this.time);
+      Renderer.drawHudButtons(ctx, this.getMenuHudLayout(), Sound.mode, this.hudHover, this.isFullscreen());
+      return;
+    }
     if (this.screen === 'single') { this.renderSingle(ctx); return; }
     if (this.screen === 'multiplayer') { this.renderMultiplayer(ctx); return; }
   },
@@ -983,7 +1006,17 @@ const Game = {
       });
     }
 
+    this.drawGameTitle(ctx);
     Renderer.drawHudButtons(ctx, this.getHudLayout(), Sound.mode, this.hudHover, this.isFullscreen());
+  },
+
+  // Top-left in Single Player; top-center in Multiplayer, where the
+  // top-left is taken by the "PLAYER 1" caption above the left well.
+  drawGameTitle(ctx, centered) {
+    const r = this.getHudLayout().exitBtn.rect;
+    const cy = r.y + r.h / 2;
+    if (centered) Renderer.drawGameTitle(ctx, CANVAS_W / 2, cy, 'center');
+    else Renderer.drawGameTitle(ctx, CANVAS_W - (r.x + r.w), cy);
   },
 
   renderMultiplayer(ctx) {
@@ -1002,6 +1035,7 @@ const Game = {
       Renderer.drawWinDialog(ctx, this.getWinDialogLayout(), label);
     }
 
+    this.drawGameTitle(ctx, true);
     Renderer.drawHudButtons(ctx, this.getHudLayout(), Sound.mode, this.hudHover, this.isFullscreen());
   },
 };
