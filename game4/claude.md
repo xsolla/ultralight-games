@@ -265,7 +265,9 @@ live; `render.js` asks it for "how do I draw color X" and nothing else.
     kept red-dominant so it never reads as Star's yellow at cell size),
     and sparks drifting up from the whole fire bed
   - **Water (blue):** the bubble fills to roughly 2/3 with a gently sloshing
-    water level, with small bubbles rising up to the surface and vanishing there
+    water level, with small bubbles rising up to the surface and vanishing
+    there, plus blue air bubbles (outlined, with a glint) escaping the
+    surface and wobbling up through the air above it, fading as they rise
   - **Life (green):** drifting firefly particles, each with a soft glow
     halo, a faint trailing echo along its own orbit, and a gentle pulse
   - **Lightning (cyan):** a constant electrical discharge — always present

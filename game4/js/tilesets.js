@@ -836,7 +836,8 @@ const Tilesets = {
     },
 
     // water (blue) — fills ~2/3 of the bubble, surface gently sloshing,
-    // with small bubbles rising up to that surface and vanishing there
+    // with small bubbles rising up to that surface and vanishing there, and
+    // blue bubbles escaping the surface to float up through the air above
     drawWater(ctx, cx, cy, r, seed, timeMs) {
       const t = timeMs / 1000 + seed * 10;
       const waterTopY = cy + r * 0.25 + Math.sin(t * 2.2) * r * 0.05;
@@ -879,6 +880,38 @@ const Tilesets = {
         ctx.beginPath();
         ctx.arc(bx, by, br, 0, Math.PI * 2);
         ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
+        ctx.fill();
+      }
+
+      // blue bubbles escaping the surface and floating up through the air
+      // above it: each emerges at the (sloshing) waterline, swells slightly,
+      // wobbles side to side and fades out before reaching the top
+      const airCount = 6;
+      const airPeriod = 2600;
+      const airTopY = cy - r * 0.8;
+      for (let i = 0; i < airCount; i++) {
+        const offset = (i / airCount) * airPeriod + seed * 3000;
+        const localT = ((timeMs + offset) % airPeriod) / airPeriod;
+        const startX = cx + Math.sin(i * 5.1 + seed * 11) * r * 0.55;
+        const bx = startX + Math.sin(localT * Math.PI * 3 + i * 2.3) * r * 0.07;
+        const by = waterTopY - localT * (waterTopY - airTopY);
+        const br = r * (0.075 + 0.05 * Math.abs(Math.sin(i * 1.9 + seed * 4))) * (0.75 + 0.25 * localT);
+        const alpha = Math.min(1, localT * 6) * (1 - localT * 0.85); // pop in at the surface, fade out rising
+
+        const bg = ctx.createRadialGradient(bx - br * 0.3, by - br * 0.3, 0, bx, by, br);
+        bg.addColorStop(0, `rgba(160, 210, 255, ${0.35 * alpha})`);
+        bg.addColorStop(1, `rgba(60, 140, 255, ${0.75 * alpha})`);
+        ctx.beginPath();
+        ctx.arc(bx, by, br, 0, Math.PI * 2);
+        ctx.fillStyle = bg;
+        ctx.fill();
+        ctx.lineWidth = Math.max(0.8, r * 0.025);
+        ctx.strokeStyle = `rgba(170, 215, 255, ${alpha})`;
+        ctx.stroke();
+        // tiny glint
+        ctx.beginPath();
+        ctx.arc(bx - br * 0.35, by - br * 0.35, br * 0.25, 0, Math.PI * 2);
+        ctx.fillStyle = `rgba(255, 255, 255, ${0.8 * alpha})`;
         ctx.fill();
       }
     },
