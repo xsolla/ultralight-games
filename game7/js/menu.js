@@ -83,7 +83,7 @@ const RECORDS = {
   SCRIM: 'rgba(4, 8, 16, 0.72)',
 };
 
-const MENU_TITLE = 'PLANET';
+const MENU_TITLE = 'PLANETARY';
 const MENU_SUB = 'DEFENSE';
 const MENU_HINT = 'build ships · give them orders · hold the line';
 

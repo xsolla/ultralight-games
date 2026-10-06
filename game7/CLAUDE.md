@@ -1,4 +1,4 @@
-# Planet Defense
+# Planetary Defense
 
 Space tower defense played in real time. A planet sits at the bottom of a vertical 9:16
 screen. The player builds autonomous spaceships and sets each one's behaviour; the ships
@@ -9,7 +9,8 @@ defend the planet against waves of alien invaders and meteors. Vanilla HTML + CS
 (https://docs.google.com/document/d/1rw-bJl204p3WBciv_G2S3PfDH5uqhpcnT346C0Sbc2c/edit).
 This file restates that doc and adds the decisions settled with the designer on
 2026-09-23. Where the two disagree, this file is newer. If the doc changes, re-read it
-and update this file.
+and update this file. The game was renamed from "Planet Defense" to "Planetary Defense"
+on 2026-10-06; the doc keeps its old title.
 
 **Status (2026-09-24): steps 1–3 of 4 are built. The game is playable end to end.** The
 build plan is:

@@ -1,4 +1,4 @@
-/* Planet Defense — canvas scaling & page chrome. Copied from game6.
+/* Planetary Defense — canvas scaling & page chrome. Copied from game6.
    The game is authored in a fixed 360x640 logical space, but the canvas backing
    store is sized to real device pixels (see resizeCanvas() in game.js) so HUD
    text and vector art stay crisp instead of being upscaled.
