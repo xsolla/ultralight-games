@@ -1,0 +1,54 @@
+/* Match-3 Racing: раскладка 9:16 в одной рамке.
+   Сверху 3D-сцена, посередине разделитель с HP игрока, снизу панель управления и поле match-3. */
+
+:root {
+  --frame: #2b3a63;          /* цвет рамки и линий разделителя */
+  --frame-glow: rgba(70, 110, 255, .22);
+}
+
+html, body { margin: 0; height: 100%; background: #05070d; color: #dde3ee; font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; overflow: hidden; }
+body { display: flex; align-items: center; justify-content: center; }
+
+/* Рамка: весь экран 9:16, вписанный в окно */
+#wrap {
+  display: flex; flex-direction: column; position: relative; box-sizing: border-box; overflow: hidden;
+  width: min(100vw, calc(100vh * 9 / 16)); height: min(100vh, calc(100vw * 16 / 9));
+  background: #0b0f1a;
+  border: 3px solid var(--frame); border-radius: 16px;
+  box-shadow: 0 0 0 1px #070a14, 0 0 26px var(--frame-glow), inset 0 0 18px rgba(0, 0, 0, .55);
+}
+
+/* 3D-сцена */
+#view { position: relative; flex: 55 1 0; min-height: 0; }
+#view canvas { display: block; width: 100%; height: 100%; }
+#hud { position: absolute; left: 8px; top: 8px; font-size: 12px; line-height: 1.4; background: rgba(0,0,0,.4); padding: 6px 8px; border-radius: 8px; pointer-events: none; white-space: pre; }
+#err { position: absolute; left: 10px; right: 10px; bottom: 10px; color: #ff8080; font-size: 13px; background: rgba(0,0,0,.6); padding: 6px 10px; border-radius: 6px; display: none; }
+
+/* Разделитель: линия рамки по всей ширине, в ней HP игрока */
+#divider {
+  flex: 0 0 auto; display: flex; align-items: center; gap: 8px; box-sizing: border-box; padding: 5px 10px;
+  background: linear-gradient(#18213c, #101730);
+  border-top: 3px solid var(--frame); border-bottom: 3px solid var(--frame);
+}
+.hp-label { font-size: 12px; font-weight: 800; letter-spacing: .08em; color: #9fb0d8; }
+#hp-bar { position: relative; flex: 1; height: 18px; border-radius: 9px; overflow: hidden; background: #070a14; box-shadow: inset 0 0 0 2px #26325a, inset 0 2px 5px rgba(0, 0, 0, .7); }
+#hp-fill {
+  position: absolute; left: 0; top: 0; bottom: 0; width: 100%; border-radius: 9px;
+  background-color: hsl(120 72% 46%);
+  transition: width .28s ease-out, background-color .28s linear;
+}
+/* блик на полосе */
+#hp-fill::after { content: ""; position: absolute; left: 0; right: 0; top: 0; height: 45%; border-radius: 9px 9px 0 0; background: linear-gradient(rgba(255, 255, 255, .35), rgba(255, 255, 255, 0)); }
+#hp-text { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 800; color: #fff; text-shadow: 0 1px 2px rgba(0, 0, 0, .9); pointer-events: none; }
+
+/* 20% HP и ниже: красная полоса мигает */
+#divider.hp-low #hp-fill { animation: hp-blink var(--hp-blink, .6s) ease-in-out infinite; }
+#divider.hp-low .hp-label { color: #ff6b6b; }
+@keyframes hp-blink {
+  0%, 100% { filter: brightness(1.35) saturate(1.2); box-shadow: 0 0 10px rgba(255, 60, 60, .9); }
+  50%      { filter: brightness(.45) saturate(1);   box-shadow: none; }
+}
+
+/* нижний бокс: поле match-3 на всю площадь. Размер клетки и число колонок считает board.js */
+#panel { flex: 45 1 0; min-height: 0; display: flex; box-sizing: border-box; background: #101522; padding: 6px; }
+#board { flex: 1 1 0; min-width: 0; min-height: 0; width: 100%; height: 100%; display: block; touch-action: none; user-select: none; -webkit-user-select: none; transition: opacity .2s; }

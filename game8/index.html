@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
+  <title>Match-3 Racing</title>
+  <link rel="stylesheet" href="css/styles.css" />
+
+  <!-- three.js: единственная внешняя зависимость. Модуль подключается с CDN и кладётся в window.THREE,
+       чтобы остальные файлы могли оставаться обычными скриптами без import/export (как в соседних играх). -->
+  <script type="importmap">
+    { "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js" } }
+  </script>
+</head>
+<body>
+  <div id="wrap">
+    <!-- 3D-сцена: canvas добавляет stage.js -->
+    <div id="view">
+      <div id="hud"></div>
+      <div id="err"></div>
+    </div>
+
+    <!-- Разделитель между сценой и нижним боксом: здесь HP игрока (hud.js) -->
+    <div id="divider">
+      <span class="hp-label">HP</span>
+      <div id="hp-bar">
+        <div id="hp-fill"></div>
+        <span id="hp-text"></span>
+      </div>
+    </div>
+
+    <!-- Нижний бокс: поле match-3 (рисует board.js) -->
+    <div id="panel">
+      <canvas id="board"></canvas>
+    </div>
+  </div>
+
+  <!-- Порядок выполнения: модуль three, затем обычные скрипты по зависимостям. Модуль и defer-скрипты
+       выполняются по порядку в документе, так что к main.js THREE уже есть.
+       constants -> util, tween -> сцена и камера -> мир (изгиб, дорога, обочина, развилки)
+       -> сущности (машины, значки, эффекты) -> правила и поле match-3 -> интерфейс и ввод -> main. -->
+  <script type="module">
+    import * as THREE from 'three';
+    window.THREE = THREE;
+  </script>
+  <script defer src="js/constants.js"></script>
+  <script defer src="js/util.js"></script>
+  <script defer src="js/tween.js"></script>
+  <script defer src="js/stage.js"></script>
+  <script defer src="js/bend.js"></script>
+  <script defer src="js/road.js"></script>
+  <script defer src="js/roadside.js"></script>
+  <script defer src="js/forks.js"></script>
+  <script defer src="js/cars.js"></script>
+  <script defer src="js/markers.js"></script>
+  <script defer src="js/fx.js"></script>
+  <script defer src="js/camera.js"></script>
+  <script defer src="js/game.js"></script>
+  <script defer src="js/match3.js"></script>
+  <script defer src="js/board.js"></script>
+  <script defer src="js/hud.js"></script>
+  <script defer src="js/input.js"></script>
+  <script defer src="js/main.js"></script>
+</body>
+</html>
