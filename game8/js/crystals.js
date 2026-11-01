@@ -18,10 +18,21 @@ const Crystals = {
     const n = parseInt(hex.slice(1), 16);
     return [n >> 16 & 255, n >> 8 & 255, n & 255];
   },
-  // k > 0 подмешивает белый, k < 0 чёрный
-  tint(c, k) {
-    const to = k > 0 ? 255 : 0, a = Math.abs(k);
-    return c.map(v => Math.round(v + (to - v) * a));
+  // [r, g, b] 0..255 -> [оттенок в градусах, насыщенность 0..1, светлота 0..1]
+  hsl(c) {
+    const [r, g, b] = c.map(v => v / 255), mx = Math.max(r, g, b), mn = Math.min(r, g, b), d = mx - mn, l = (mx + mn) / 2;
+    if (!d) return [0, 0, l];
+    const h = mx === r ? (g - b) / d + (g < b ? 6 : 0) : mx === g ? (b - r) / d + 2 : (r - g) / d + 4;
+    return [h * 60, d / (1 - Math.abs(2 * l - 1)), l];
+  },
+  fromHsl(h, s, l) {
+    const a = s * Math.min(l, 1 - l), k = n => (n + h / 30) % 12;
+    return [0, 8, 4].map(n => Math.round((l - a * Math.max(-1, Math.min(k(n) - 3, 9 - k(n), 1))) * 255));
+  },
+  // Тот же оттенок с заданной светлотой, насыщенность не ниже CRYSTAL.SATURATION: цвет не выцветает ни в светлом, ни в тёмном
+  shade(c, l) {
+    const [h, s] = Crystals.hsl(c);
+    return Crystals.fromHsl(h, Math.max(s, CONFIG.MATCH3.CRYSTAL.SATURATION), l);
   },
   rgba: (c, a) => `rgba(${c[0]},${c[1]},${c[2]},${a})`,
 
@@ -41,11 +52,18 @@ const Crystals = {
     return pts;
   },
 
+  // Путь многоугольника со скруглёнными углами радиуса rad (углы и выпуклые, и вогнутые, как у креста)
+  round(g, pts, rad) {
+    const n = pts.length, a = pts[n - 1], b = pts[0];
+    g.beginPath();
+    g.moveTo((a[0] + b[0]) / 2, (a[1] + b[1]) / 2);
+    for (let i = 0; i < n; i++) { const p = pts[i], q = pts[(i + 1) % n]; g.arcTo(p[0], p[1], q[0], q[1], rad); }
+    g.closePath();
+  },
+
   // Путь контура кристалла типа type с центром (x, y) и радиусом r
   trace(g, type, x, y, r) {
-    g.beginPath();
-    Crystals.outline(type).forEach(([px, py], i) => { i ? g.lineTo(x + px * r, y + py * r) : g.moveTo(x + px * r, y + py * r); });
-    g.closePath();
+    Crystals.round(g, Crystals.outline(type).map(([px, py]) => [x + px * r, y + py * r]), r * CONFIG.MATCH3.CRYSTAL.CORNER);
   },
 
   // ---- картинка кристалла ----
@@ -59,63 +77,81 @@ const Crystals = {
     return { canvas, size };
   },
 
-  // Прозрачный гранёный кристалл: свечение, тело с градиентом, граня по кольцу, светлая площадка в центре,
-  // светлые рёбра со стороны света, обводка и маленький блик
+  // Прозрачный гранёный кристалл. Всё в насыщенных оттенках своего цвета (без белой и чёрной заливки):
+  // цветное свечение вокруг (под телом стирается, чтобы тело оставалось прозрачным), тело прозрачнее в центре
+  // и плотнее у края, грани по кольцу, свет, собравшийся на дальней стороне, площадка в центре, светлый
+  // край со стороны света и мягкий блик. Углы скруглены.
   paint(g, type, R, glow, dpr) {
-    const C = CONFIG.MATCH3.CRYSTAL, T = CONFIG.MATCH3.TILES[type], tint = Crystals.tint, rgba = Crystals.rgba;
-    const base = Crystals.rgb(T.color), L = C.LIGHT * Math.PI / 180;
+    const C = CONFIG.MATCH3.CRYSTAL, T = CONFIG.MATCH3.TILES[type], rgba = Crystals.rgba;
+    const base = Crystals.rgb(T.color), tone = l => Crystals.shade(base, l);
+    const deep = tone(C.TONES.DEEP), mid = tone(C.TONES.MID), light = tone(C.TONES.LIGHT), pale = tone(C.TONES.PALE);
+    const L = C.LIGHT * Math.PI / 180, lx = Math.cos(L), ly = Math.sin(L);       // направление на свет
     const P = Crystals.outline(type).map(([x, y]) => [x * R, y * R]);
     const Q = P.map(([x, y]) => [x * C.INNER, y * C.INNER]);
-    const n = P.length;
-    const poly = pts => { g.beginPath(); pts.forEach(([x, y], i) => i ? g.lineTo(x, y) : g.moveTo(x, y)); g.closePath(); };
+    const n = P.length, ext = Math.max(...P.map(([x, y]) => Math.hypot(x, y)));
+    const shape = (pts, k) => Crystals.round(g, pts, R * C.CORNER * k);
+    const across = (a, b) => g.createLinearGradient(lx * ext * a, ly * ext * a, lx * ext * b, ly * ext * b);   // вдоль направления света
 
-    // мягкое цветное свечение вокруг
+    // свечение: рисуется только тень фигуры (сама фигура сдвинута за край картинки), потом под телом стирается
+    const off = (ext + glow) * 4;
     g.save();
-    g.shadowColor = rgba(base, 0.9); g.shadowBlur = glow * dpr;
-    poly(P); g.fillStyle = rgba(base, C.ALPHA * 0.6); g.fill();
+    g.shadowColor = rgba(mid, C.GLOW_ALPHA); g.shadowBlur = glow * dpr; g.shadowOffsetX = off * dpr;
+    g.translate(-off, 0); shape(P, 1); g.fillStyle = '#000'; g.fill();
+    g.restore();
+    g.save();
+    g.globalCompositeOperation = 'destination-out'; shape(P, 1); g.fill();
     g.restore();
 
-    // тело: прозрачное, светлее слева сверху и темнее справа снизу
-    const body = g.createLinearGradient(-R, -R, R, R);
-    body.addColorStop(0, rgba(tint(base, 0.45), Math.min(1, C.ALPHA + 0.2)));
-    body.addColorStop(1, rgba(tint(base, -0.35), C.ALPHA));
-    poly(P); g.fillStyle = body; g.fill();
+    g.save();
+    shape(P, 1); g.clip();
 
-    // грани по кольцу между внешним и внутренним контуром: освещённые светлее, остальные темнее
-    const lit = [];
+    // тело: прозрачное в центре, плотное и глубокое у края
+    const body = g.createRadialGradient(0, 0, 0, 0, 0, ext);
+    body.addColorStop(0, rgba(mid, C.ALPHA_CORE));
+    body.addColorStop(0.55, rgba(mid, (C.ALPHA_CORE + C.ALPHA_RIM) / 2));
+    body.addColorStop(1, rgba(deep, C.ALPHA_RIM));
+    g.fillStyle = body; g.fillRect(-ext, -ext, ext * 2, ext * 2);
+
+    // грани по кольцу между внешним и внутренним контуром: к свету светлее, от света глубже
     for (let i = 0; i < n; i++) {
       const a = P[i], b = P[(i + 1) % n], qa = Q[i], qb = Q[(i + 1) % n];
       const d = Math.cos(Math.atan2((a[1] + b[1]) / 2, (a[0] + b[0]) / 2) - L);     // насколько грань смотрит на свет
       g.beginPath(); g.moveTo(a[0], a[1]); g.lineTo(b[0], b[1]); g.lineTo(qb[0], qb[1]); g.lineTo(qa[0], qa[1]); g.closePath();
-      g.fillStyle = d > 0 ? `rgba(255,255,255,${d * C.FACET_LIGHT})` : `rgba(0,0,0,${-d * C.FACET_DARK})`;
+      g.fillStyle = d > 0 ? rgba(light, d * C.FACET_LIGHT) : rgba(deep, -d * C.FACET_DARK);
       g.fill();
-      lit.push(d);
     }
 
-    // внутренняя площадка
-    const table = g.createLinearGradient(-R * C.INNER, -R * C.INNER, R * C.INNER, R * C.INNER);
-    table.addColorStop(0, 'rgba(255,255,255,0.45)');
-    table.addColorStop(1, rgba(base, 0.12));
-    poly(Q); g.fillStyle = table; g.fill();
-    g.lineWidth = 1; g.strokeStyle = 'rgba(255,255,255,0.5)'; g.lineJoin = 'round'; g.stroke();
+    // свет, прошедший сквозь кристалл, собирается на дальней от света стороне
+    const cx = -lx * ext * 0.3, cy = -ly * ext * 0.3, caustic = g.createRadialGradient(cx, cy, 0, cx, cy, ext * 0.55);
+    caustic.addColorStop(0, rgba(light, C.CAUSTIC)); caustic.addColorStop(1, rgba(light, 0));
+    g.globalCompositeOperation = 'lighter';
+    g.fillStyle = caustic; g.fillRect(-ext, -ext, ext * 2, ext * 2);
+    g.globalCompositeOperation = 'source-over';
+
+    // площадка в центре: светлее к свету, почти прозрачная от него
+    const table = across(C.INNER, -C.INNER);
+    table.addColorStop(0, rgba(pale, 0.4)); table.addColorStop(1, rgba(mid, 0.04));
+    shape(Q, C.INNER); g.fillStyle = table; g.fill();
+    g.lineWidth = Math.max(0.6, R * 0.025); g.strokeStyle = rgba(pale, 0.4); g.stroke();
 
     // рёбра между гранями
-    g.strokeStyle = 'rgba(255,255,255,0.38)'; g.lineWidth = 1;
+    g.strokeStyle = rgba(pale, 0.22);
     g.beginPath(); for (let i = 0; i < n; i++) { g.moveTo(P[i][0], P[i][1]); g.lineTo(Q[i][0], Q[i][1]); } g.stroke();
 
-    // светлые рёбра там, где грань смотрит на свет
-    g.strokeStyle = 'rgba(255,255,255,0.85)'; g.lineWidth = 1.8; g.lineCap = 'round';
-    for (let i = 0; i < n; i++) if (lit[i] > 0.55) { g.beginPath(); g.moveTo(P[i][0], P[i][1]); g.lineTo(P[(i + 1) % n][0], P[(i + 1) % n][1]); g.stroke(); }
+    // край: изнутри фигуры (обрезан по контуру, поэтому мягкий), со стороны света почти белый
+    const rim = across(1, -1);
+    rim.addColorStop(0, 'rgba(255,255,255,0.9)'); rim.addColorStop(0.45, rgba(pale, 0.5)); rim.addColorStop(1, rgba(light, 0.3));
+    shape(P, 1); g.lineWidth = R * C.RIM * 2; g.strokeStyle = rim; g.stroke();
 
-    // обводка
-    poly(P); g.strokeStyle = rgba(tint(base, 0.6), 0.95); g.lineWidth = 1.4; g.lineJoin = 'round'; g.stroke();
-
-    // маленький блик у вершины внутренней площадки, обращённой к свету
+    // мягкий блик: вытянутое пятно у вершины площадки, ближайшей к свету
     let best = 0, bd = -Infinity;
-    Q.forEach(([x, y], i) => { const d = x * Math.cos(L) + y * Math.sin(L); if (d > bd) { bd = d; best = i; } });
-    const sx = Q[best][0] * 0.6, sy = Q[best][1] * 0.6;
-    g.fillStyle = 'rgba(255,255,255,0.8)';
-    g.beginPath(); g.arc(sx, sy, Math.max(1, R * 0.07), 0, Math.PI * 2); g.fill();
+    Q.forEach(([x, y], i) => { const d = x * lx + y * ly; if (d > bd) { bd = d; best = i; } });
+    const sr = R * C.SPECULAR;
+    g.translate(Q[best][0] * 0.6, Q[best][1] * 0.6); g.rotate(L + Math.PI / 2); g.scale(1, 0.55);
+    const spec = g.createRadialGradient(0, 0, 0, 0, 0, sr);
+    spec.addColorStop(0, 'rgba(255,255,255,0.95)'); spec.addColorStop(0.35, 'rgba(255,255,255,0.45)'); spec.addColorStop(1, 'rgba(255,255,255,0)');
+    g.fillStyle = spec; g.beginPath(); g.arc(0, 0, sr, 0, Math.PI * 2); g.fill();
+    g.restore();
   },
 
   // ---- блик ----
