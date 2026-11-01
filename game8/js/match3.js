@@ -59,8 +59,8 @@ const Match3 = {
   // winners это один или два цвета, candidates это среди кого шёл случайный выбор (или null),
   // landing это на ком выбор остановился (для показа).
   choose(counts) {
-    const M = CONFIG.MATCH3, cmd = t => M.TILES[t].command;
-    const opposite = (a, b) => M.OPPOSITE[cmd(a)] === cmd(b);
+    const M = CONFIG.MATCH3, cmd = t => [...M.TILES[t].command];
+    const opposite = (a, b) => cmd(a).some(x => cmd(b).includes(M.OPPOSITE[x]));   // у цвета может быть несколько команд
     const pickOne = list => list[Math.random() * list.length | 0];
     const types = counts.map((n, i) => i).filter(i => counts[i] > 0);
     if (types.length <= 1) return { winners: types, candidates: null, landing: null };

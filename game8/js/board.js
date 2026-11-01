@@ -164,7 +164,7 @@ const Board = {
       Hud.tallyHide();
       await shown;
     } else await BoardFx.reveal(pick.winners, from);
-    Game.play(pick.winners.map(t => CONFIG.MATCH3.TILES[t].command));
+    Game.play(pick.winners.flatMap(t => [...CONFIG.MATCH3.TILES[t].command]));   // у цвета может быть несколько команд
   },
 
   // ---- анимации ----
