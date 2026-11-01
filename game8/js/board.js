@@ -3,10 +3,13 @@
 // падение и каскады. Правила (поиск линий, ходы, генерация) в match3.js, числа в CONFIG.MATCH3.
 //
 // Ход игрока: клик по кружку выделяет его, клик по соседнему (по горизонтали или вертикали) меняет их
-// местами. Если линии нет, свап откатывается. Если есть, кружки схлопываются, и:
-//   - каждая схлопнувшаяся группа даёт команду машине по её цвету (CONFIG.MATCH3.TILES[].command);
-//   - потом пустоты заполняются падающими кружками, а новые линии (каскады) схлопываются без команд.
-// Фиолетовая команда V (показать намерения) бесплатная и идёт первой, остальные по очереди как ходы.
+// местами. Если линии нет, свап откатывается. Если есть, кружки схлопываются, пустоты заполняются
+// падающими кружками, новые линии (каскады) схлопываются дальше, пока поле не успокоится. Все
+// схлопнутые за цепочку кружки считаются по цветам, и в конце:
+//   - если схлопнулся один цвет, срабатывает его команда (CONFIG.MATCH3.TILES[].command);
+//   - если цветов несколько, HP в разделителе заменяется счётчиком и ОДНОВРЕМЕННО срабатывают два цвета
+//     с наибольшим числом кружков (Match3.choose, при равенстве случайный выбор через Hud.tallyPick).
+// Как складываются две команды в одном ходе, описано в game.js (Game.doCommands).
 //
 // Ввод закрыт, пока идёт анимация поля или ход машин (Game.isBusy). Всё время идёт через Tween.
 // Колонок столько, чтобы кружки заполнили всю ширину бокса: клетка по высоте = высота / ROWS.
@@ -69,6 +72,7 @@ const Board = {
   // Новая партия: другое поле, кружки "вырастают"
   async reset() {
     Board.selected = null;
+    Hud.tallyHide();
     Board.animating = true;
     Board.build();
     await Board.popIn();
@@ -107,24 +111,39 @@ const Board = {
     let cells = Match3.find(Board.tiles);
     if (!cells.length) { await Board.swapAnim(a, b); Board.animating = false; return; }   // линии нет, откат
 
-    // первое схлопывание даёт команды машине
-    Board.dispatch(Match3.groups(Board.tiles, cells));
-    // затем падение и каскады без команд
+    // вся цепочка схлопываний (с каскадами) считается по цветам и даёт одну команду
+    const counts = Array(CONFIG.MATCH3.TILES.length).fill(0);
     while (cells.length) {
+      Board.count(cells, counts);
       await Board.clearAnim(cells);
       await Board.refill();
       cells = Match3.find(Board.tiles);
     }
+    await Board.decide(counts);
     if (!Match3.hasMove(Board.tiles)) await Board.reshuffle();
     Board.snap();
     Board.animating = false;
   },
 
-  // Команды по цветам групп. V (бесплатная информация) идёт первой, остальные встают в очередь ходов.
-  dispatch(groups) {
-    const cmds = groups.map(g => CONFIG.MATCH3.TILES[g.type].command);
-    cmds.sort((a, b) => (b === 'V') - (a === 'V'));
-    for (const cmd of cmds) Game.act(cmd);
+  // Прибавить схлопывающиеся кружки к счёту по цветам. Как только цветов стало больше одного,
+  // HP в разделителе заменяется счётчиком, он обновляется с каждым шагом каскада.
+  count(cells, counts) {
+    for (const [r, c] of cells) counts[Board.tiles[r][c].type]++;
+    if (counts.filter(n => n > 0).length > 1) Hud.tallyShow(counts);
+  },
+
+  // Итог цепочки: один цвет срабатывает сразу, а если цветов несколько, срабатывают два самых
+  // многочисленных ОДНОВРЕМЕННО (Match3.choose). Если выбор случайный, счётчик это показывает.
+  // Потом счётчик исчезает, HP возвращается, и команды уходят в игру одним ходом.
+  async decide(counts) {
+    const pick = Match3.choose(counts);
+    if (!pick.winners.length) return;
+    if (counts.filter(n => n > 0).length > 1) {
+      if (pick.candidates) { Game.state.log = 'Поровну: случайный выбор'; Hud.refresh(); }
+      await Hud.tallyPick(pick.candidates, pick.winners, pick.landing);
+      Hud.tallyHide();
+    }
+    Game.play(pick.winners.map(t => CONFIG.MATCH3.TILES[t].command));
   },
 
   // ---- анимации ----

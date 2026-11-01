@@ -6,9 +6,10 @@
 // показывают результат. Игровая логика не знает про изгиб дороги: она двигает car.holder в
 // логических координатах сетки, а cars.js накладывает изгиб при отрисовке.
 //
-// Команды игрока (L влево, R вправо, F рывок вперёд, B торможение назад, S пропуск, V показать намерения)
-// приходят из поля match-3 (board.js) и с клавиатуры (input.js, для отладки). Цифры (HP, урон, тайминги,
-// шансы) в CONFIG.
+// Команды игрока (L влево, R вправо, F рывок вперёд, B торможение назад, S пропуск, H лечение, V показать
+// намерения) приходят из поля match-3 (board.js) по одной или по две сразу и с клавиатуры (input.js, для
+// отладки). Две команды срабатывают одновременно: F+R диагональ вперёд-вправо, F+B или L+R дёргание на месте
+// (со столкновением с соседом), H лечит во время хода. Цифры (HP, урон, тайминги, шансы) в CONFIG.
 // ============================================================================
 
 const Game = {
@@ -103,22 +104,76 @@ const Game = {
   },
 
   // ---- ход машины ----
-  async doMove(car, dir) {
-    if (dir === 'S') return;
-    const T = CONFIG.TIMING, A = CONFIG.ANIM;
-    if (dir === 'B') car.brakeT = T.BRAKE_LAMPS;
-    const [dr, dl] = Game.DIRS[dir];
+  // Лечение: +HP (не выше максимума) и бирюзовая вспышка корпуса. Тратит ход, как и любое действие, кроме V.
+  async heal(car) {
+    const F = CONFIG.FX.HEAL;
+    car.hp = Math.min(car.maxHp, car.hp + CONFIG.RULES.HEAL);
+    Markers.drawHp(car);
+    if (car.isPlayer) Hud.updateHp();
+    Game.state.log = `Ремонт: +${CONFIG.RULES.HEAL} HP`;
+    car.bodyMat.emissive.setHex(F.COLOR);
+    await Tween.run(CONFIG.TIMING.HEAL, k => { car.bodyMat.emissiveIntensity = F.INTENSITY * Math.sin(k * Math.PI); }, Util.linear);
+    car.bodyMat.emissiveIntensity = 0;
+  },
+
+  // Дёрнуться в сторону dir и вернуться: машина остаётся на месте
+  twitch(car, dir) {
+    const [dr, dl] = Game.DIRS[dir], A = CONFIG.ANIM.TWITCH;
+    if (dir === 'B') car.brakeT = CONFIG.TIMING.BRAKE_LAMPS;
+    return Tween.run(CONFIG.TIMING.TWITCH, k => {
+      const s = Math.sin(k * Math.PI);
+      car.dx = dl * A.AMP * s; car.dz = -dr * A.AMP * s;               // вперёд это -z
+    }, Util.linear);
+  },
+
+  // Шаг машины игрока по одному направлению или по диагонали (два направления, не противоположных).
+  // Ячейка занята: таран. Стена: одиночный ход упирается, а диагональ скользит вдоль стены.
+  async step(car, dirs) {
+    const T = CONFIG.TIMING, A = CONFIG.ANIM, D = Game.DIRS;
+    let dr = 0, dl = 0;
+    for (const d of dirs) { dr += D[d][0]; dl += D[d][1]; }
+    if (dirs.includes('B')) car.brakeT = T.BRAKE_LAMPS;
     const nr = car.row + dr, nl = car.lane + dl;
-    if (!Game.inBounds(nr, nl)) { await Game.wiggle(car); return; }
+    if (!Game.inBounds(nr, nl)) {
+      const free = dirs.filter(d => Game.inBounds(car.row + D[d][0], car.lane + D[d][1]));
+      if (dirs.length > 1 && free.length === 1) { await Game.step(car, free); return; }   // скользим вдоль стены
+      await Game.wiggle(car); return;
+    }
     const other = Game.carAt(nr, nl);
     if (other) { await Game.collide(car, other); return; }
     car.row = nr; car.lane = nl;
     if (car.isPlayer) Game.state.playerRow = nr;
     const anims = [car.isPlayer ? Game.relayout(T.MOVE) : Game.moveTo(car, T.MOVE)];
-    if (dir === 'L' || dir === 'R') anims.push(Game.lean(car, dir));
-    if (car.isPlayer && dir === 'F') { Fx.fovBoost = CONFIG.FX.DASH_FOV; anims.push(Game.lunge(car, A.LUNGE.FORWARD)); }
-    if (car.isPlayer && dir === 'B') anims.push(Game.lunge(car, A.LUNGE.BACK));
+    for (const d of dirs) if (d === 'L' || d === 'R') anims.push(Game.lean(car, d));
+    if (car.isPlayer && dirs.includes('F')) { Fx.fovBoost = CONFIG.FX.DASH_FOV; anims.push(Game.lunge(car, A.LUNGE.FORWARD)); }
+    if (car.isPlayer && dirs.includes('B')) anims.push(Game.lunge(car, A.LUNGE.BACK));
     await Promise.all(anims);
+  },
+
+  // Противоположные направления (рывок и тормоз, влево и вправо): машина остаётся на месте и дёргается
+  // в обе стороны. Если там стоит противник, она с ним сталкивается, если стена, упирается.
+  async jerk(car, d1, d2) {
+    for (const d of [d1, d2]) {
+      if (!car.alive) break;
+      const [dr, dl] = Game.DIRS[d], nr = car.row + dr, nl = car.lane + dl;
+      if (!Game.inBounds(nr, nl)) { await Game.wiggle(car); continue; }
+      const other = Game.carAt(nr, nl);
+      if (other) await Game.collide(car, other); else await Game.twitch(car, d);
+    }
+  },
+
+  // Набор команд одного хода игрока (одна или две одновременно): направления складываются в вектор
+  // (F+R диагональ вперёд-вправо и так далее), противоположные дёргаются на месте, H лечит параллельно.
+  // V здесь не бывает: её обрабатывает play (раскрытие намерений).
+  async doCommands(car, cmds) {
+    const dirs = cmds.filter(c => 'FBLR'.includes(c)), jobs = [];
+    if (cmds.includes('H')) jobs.push(Game.heal(car));
+    if (dirs.length === 1) jobs.push(Game.step(car, dirs));
+    else if (dirs.length === 2) {
+      const opposite = CONFIG.MATCH3.OPPOSITE[dirs[0]] === dirs[1];
+      jobs.push(opposite ? Game.jerk(car, dirs[0], dirs[1]) : Game.step(car, dirs));
+    }
+    await Promise.all(jobs);
   },
 
   // a таранит b: сближение, удар (искры, тряска, вспышка, урон), отскок, возможные вылеты
@@ -191,18 +246,19 @@ const Game = {
   },
 
   // ---- команды ----
-  // Выполняет очередь команд игрока: каждая это полный ход (машина игрока, затем все противники)
+  // Выполняет очередь ходов игрока: каждый это полный ход (машина игрока, затем все противники)
   async drain() {
     const S = Game.state;
-    if (S.busy) return;                       // уже идёт: он сам заберёт новые команды из очереди
+    if (S.busy) return;                       // уже идёт: он сам заберёт новые ходы из очереди
     S.busy = true;
     try {
       while (Game.queue.length && Game.player().alive) {
-        const dir = Game.queue.shift();
+        const { cmds, reveal } = Game.queue.shift();
         S.log = '';
-        await Game.doMove(Game.player(), dir);
+        await Game.doCommands(Game.player(), cmds);
         await Tween.wait(CONFIG.TIMING.AFTER_PLAYER_MOVE);
         await Game.enemiesTurn();
+        if (reveal) { S.reveal = true; Game.showIntents(); }          // V вместе с ходом: открыть планы врагов на следующий ход
       }
     } catch (e) {
       S.log = 'Ошибка: ' + e.message; console.error(e);
@@ -215,15 +271,23 @@ const Game = {
   // Занята ли игра ходом (идёт ход или есть команды в очереди). Пока занята, поле match-3 закрыто.
   isBusy: () => Game.state.busy || Game.queue.length > 0,
 
-  // Единая точка входа команд: L R F B S это ходы, V показать намерения врагов (бесплатно, до их хода),
-  // X начать заново. Команды дают кружки match-3 (board.js) и клавиши для отладки.
+  // Ход игрока из одной или двух команд, срабатывающих одновременно (их даёт поле match-3, см. board.js).
+  // L R F B S H тратят ход. V показать намерения врагов: одна, она бесплатна и открывает планы сразу;
+  // вместе с ходом она открывает планы врагов на СЛЕДУЮЩИЙ ход, когда ход уже сделан.
+  play(cmds) {
+    const p = Game.player();
+    if (!p || !p.alive) return;
+    const reveal = cmds.includes('V'), rest = cmds.filter(c => c !== 'V');
+    if (!rest.length) { Game.state.reveal = true; Game.showIntents(); Hud.refresh(); return; }
+    if (Game.queue.length >= CONFIG.RULES.COMMAND_QUEUE) return;
+    Game.queue.push({ cmds: rest, reveal });
+    Game.drain();
+  },
+
+  // Одна команда (клавиатура для отладки и консоль): L R F B S H V, X начать заново.
   act(a) {
     if (a === 'X') { Game.reset(); Board.reset(); return; }
-    if (a === 'V') { Game.state.reveal = true; Game.showIntents(); Hud.refresh(); return; }
-    const p = Game.player();
-    if (!p || !p.alive || Game.queue.length >= CONFIG.RULES.COMMAND_QUEUE) return;
-    Game.queue.push(a);
-    Game.drain();
+    Game.play([a]);
   },
 
   // ---- покадровое ----

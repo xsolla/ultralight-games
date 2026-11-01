@@ -6,8 +6,8 @@
 // живёт в board.js.
 //
 //   Match3.find(grid)             все клетки в линиях из MIN_MATCH и более одного цвета, [[r, c], ...]
-//   Match3.groups(grid, cells)    эти клетки по связным группам одного цвета: [{ type, cells }, ...]
 //   Match3.hasMove(grid)          есть ли хоть один свап соседей, дающий линию
+//   Match3.choose(counts)         какие цвета срабатывают по итогам цепочки (один или два)
 //   Match3.generate(rows, cols)   новое поле из типов без готовых линий, но с ходом
 // ============================================================================
 
@@ -31,26 +31,6 @@ const Match3 = {
     return cells;
   },
 
-  // Связные (по восьми соседям) группы клеток одного цвета. Каждая группа это одно "схлопывание".
-  groups(grid, cells) {
-    const key = (r, c) => r * 1000 + c, left = new Map(cells.map(([r, c]) => [key(r, c), [r, c]]));
-    const out = [];
-    while (left.size) {
-      const [k0, [r0, c0]] = left.entries().next().value;
-      left.delete(k0);
-      const type = Match3.typeAt(grid, r0, c0), comp = [[r0, c0]], stack = [[r0, c0]];
-      while (stack.length) {
-        const [r, c] = stack.pop();
-        for (let dr = -1; dr <= 1; dr++) for (let dc = -1; dc <= 1; dc++) {
-          const k = key(r + dr, c + dc), n = left.get(k);
-          if (n && Match3.typeAt(grid, n[0], n[1]) === type) { left.delete(k); comp.push(n); stack.push(n); }
-        }
-      }
-      out.push({ type, cells: comp });
-    }
-    return out;
-  },
-
   // Свап двух клеток прямо в сетке (меняются элементы массива, сами объекты не трогаются)
   swap(grid, r1, c1, r2, c2) {
     const t = grid[r1][c1]; grid[r1][c1] = grid[r2][c2]; grid[r2][c2] = t;
@@ -71,6 +51,40 @@ const Match3 = {
   },
 
   randomType: () => Math.random() * CONFIG.MATCH3.TILES.length | 0,
+
+  // Какие цвета срабатывают по итогам цепочки. counts[i] это сколько кружков цвета i схлопнулось.
+  // Один цвет срабатывает один. Несколько: срабатывают два самых многочисленных одновременно.
+  // Если на место в паре претендуют несколько равных, выбор случайный, но противоположные пары
+  // (F и B, L и R) исключаются, пока есть другие. Возвращает { winners, candidates, landing }:
+  // winners это один или два цвета, candidates это среди кого шёл случайный выбор (или null),
+  // landing это на ком выбор остановился (для показа).
+  choose(counts) {
+    const M = CONFIG.MATCH3, cmd = t => M.TILES[t].command;
+    const opposite = (a, b) => M.OPPOSITE[cmd(a)] === cmd(b);
+    const pickOne = list => list[Math.random() * list.length | 0];
+    const types = counts.map((n, i) => i).filter(i => counts[i] > 0);
+    if (types.length <= 1) return { winners: types, candidates: null, landing: null };
+
+    const max = Math.max(...types.map(t => counts[t]));
+    const top = types.filter(t => counts[t] === max);
+    if (top.length === 2) return { winners: top, candidates: null, landing: null };
+
+    if (top.length >= 3) {                                     // равны три цвета и больше: случайная пара
+      const pairs = [];
+      for (let i = 0; i < top.length; i++) for (let j = i + 1; j < top.length; j++) pairs.push([top[i], top[j]]);
+      const good = pairs.filter(p => !opposite(p[0], p[1])), pool = good.length ? good : pairs;
+      const pair = pickOne(pool);
+      return { winners: pair, candidates: [...new Set(pool.flat())], landing: pair[0] };
+    }
+
+    const rest = types.filter(t => t !== top[0]);              // один лидер: ищем второго
+    const second = Math.max(...rest.map(t => counts[t]));
+    const tied = rest.filter(t => counts[t] === second);
+    if (tied.length === 1) return { winners: [top[0], tied[0]], candidates: null, landing: null };
+    const good = tied.filter(t => !opposite(top[0], t)), pool = good.length ? good : tied;
+    const chosen = pickOne(pool);
+    return { winners: [top[0], chosen], candidates: pool.length > 1 ? pool : null, landing: chosen };
+  },
 
   // Поле типов rows x cols без готовых линий, но хотя бы с одним ходом
   generate(rows, cols) {
