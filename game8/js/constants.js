@@ -85,7 +85,7 @@ const CONFIG = {
   RULES: {
     RAM_DAMAGE_SELF: 1,       // атакующий теряет
     RAM_DAMAGE_TARGET: 2,     // цель теряет
-    HEAL: 1,                  // сколько HP возвращает бирюзовая команда (не больше максимума); тратит ход
+    HEAL: 1,                  // сколько HP возвращает зелёная команда (не больше максимума); тратит ход
     COMMAND_QUEUE: 3,         // сколько команд игрока может ждать своей очереди
   },
 
@@ -109,10 +109,10 @@ const CONFIG = {
     TILES: [
       { id: 'red',    color: '#e74c3c', command: 'F' },
       { id: 'yellow', color: '#f1c40f', command: 'L' },
-      { id: 'green',  color: '#2ecc71', command: 'R' },
+      { id: 'green',  color: '#2ecc71', command: 'H' },
       { id: 'blue',   color: '#3498db', command: 'B' },
       { id: 'purple', color: '#9b59b6', command: 'V' },
-      { id: 'teal',   color: '#19d3da', command: 'H' },
+      { id: 'teal',   color: '#19d3da', command: 'R' },
     ],
     DIRECTIONS: [[0, 1], [1, 0], [1, 1], [1, -1]],   // горизонталь, вертикаль, две диагонали
     OPPOSITE: { F: 'B', B: 'F', L: 'R', R: 'L' },    // противоположные команды: в паре дёргают машину на месте
@@ -168,7 +168,7 @@ const CONFIG = {
     SHAKE_RAM: 0.5, SHAKE_KNOCKOUT: 0.8,
     BURST_RAM: 18, BURST_KNOCKOUT: 30,
     HIT_HEIGHT: 0.9,
-    HEAL: { COLOR: 0x19d3da, INTENSITY: 0.9 },   // бирюзовая вспышка корпуса при лечении
+    HEAL: { COLOR: 0x2ecc71, INTENSITY: 0.9 },   // зелёная вспышка корпуса при лечении
     SPARKS: {
       COUNT: 48, SIZE: 0.14, COLOR: 0xffc040,
       LIFE: 0.45, LIFE_RANGE: 0.3,
