@@ -17,6 +17,7 @@ const Hud = {
   errEl: null,
   divider: null, hpFill: null, hpText: null,
   tallyItems: [],    // по одному элементу на цвет кружка
+  tallyCounts: [],   // числа, которые сейчас показывает счётчик
 
   init() {
     Hud.el = document.getElementById('hud');
@@ -41,11 +42,25 @@ const Hud = {
   },
 
   // ---- Счётчик цветов (вместо HP, пока в цепочке больше одного цвета) ----
-  // counts[i] это сколько кружков цвета i схлопнулось за цепочку.
+  // counts[i] это сколько кружков цвета i схлопнулось за цепочку. Дальше к счёту прибавляют кометы
+  // (BoardFx.comet), долетая до значка своего цвета (tallyAdd).
   tallyShow(counts) {
     if (!Hud.divider) return;
     Hud.divider.classList.add('tally-mode');
-    const max = Math.max(...counts);
+    Hud.tallyCounts = counts.slice();
+    Hud.tallyRender();
+  },
+
+  tallyAdd(type) {
+    if (!Hud.tallyOn()) return;
+    Hud.tallyCounts[type]++;
+    Hud.tallyRender();
+    const el = Hud.tallyItems[type];                              // вспышка значка: класс снимается и ставится заново
+    el.classList.remove('hit'); void el.offsetWidth; el.classList.add('hit');
+  },
+
+  tallyRender() {
+    const counts = Hud.tallyCounts, max = Math.max(...counts);
     Hud.tallyItems.forEach((el, i) => {
       el.querySelector('b').textContent = counts[i];
       el.classList.toggle('has', counts[i] > 0);
@@ -57,8 +72,11 @@ const Hud = {
   tallyHide() {
     if (!Hud.divider) return;
     Hud.divider.classList.remove('tally-mode');
-    for (const el of Hud.tallyItems) el.classList.remove('lead', 'pick', 'win');
+    for (const el of Hud.tallyItems) el.classList.remove('lead', 'pick', 'win', 'hit');
   },
+
+  tallyOn: () => !!Hud.divider && Hud.divider.classList.contains('tally-mode'),
+  tallyIcon: type => Hud.tallyItems[type].querySelector('canvas'),      // значок-кристалл цвета type
 
   // Итог: срабатывают winners (один или два цвета). Если выбор был случайным (candidates), подсветка
   // бегает по кандидатам и замедляется на landing. Потом победители подсвечиваются на паузу.

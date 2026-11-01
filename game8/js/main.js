@@ -29,6 +29,7 @@ const Main = {
     Rig.init();
     Input.init();
     Board.init();
+    BoardFx.init();
     Game.reset();
 
     Main.last = performance.now();
@@ -42,6 +43,7 @@ const Main = {
     if (!Main.paused) Main.update(dt);
     Stage.render();
     Board.draw();
+    BoardFx.draw();
 
     Main.fpsAcc += dt; Main.fpsN++;
     if (Main.fpsAcc > CONFIG.UI.FPS_WINDOW) {
@@ -63,19 +65,20 @@ const Main = {
     Game.update(dt, t);                                // машины
     Fx.update(dt);                                     // искры, тряска, толчок угла обзора
     Rig.update(dt, t, Game.targetX());                 // камера
+    BoardFx.update(dt);                                // кометы и искры поля match-3
   },
 
   // Отладка из консоли браузера: window.__dbg. Страница в панели предпросмотра может остановить
   // requestAnimationFrame, поэтому есть ручной прогон кадров step(n).
   debugApi() {
     return {
-      CONFIG, G: Game.state, tweens: Tween.list, act: Game.act, camera: Stage.camera, scene: Stage.scene, Board, Match3, Game,
+      CONFIG, G: Game.state, tweens: Tween.list, act: Game.act, camera: Stage.camera, scene: Stage.scene, Board, BoardFx, Match3, Game,
       oxAt: Bend.ox, psiAt: Bend.psi, forks: Forks.list, spawnFork: Forks.spawn,
       pause: v => { Main.paused = v; },
       setOdo: v => { Bend.odo = v; }, getOdo: () => Bend.odo,
       step: async (n, dt = 1 / 60) => {
         for (let i = 0; i < n; i++) { Main.update(dt); await Promise.resolve(); }
-        Stage.render(); Board.draw(); Hud.refresh();
+        Stage.render(); Board.draw(); BoardFx.draw(); Hud.refresh();
       },
     };
   },

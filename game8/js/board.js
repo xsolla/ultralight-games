@@ -13,7 +13,8 @@
 // Как складываются две команды в одном ходе, описано в game.js (Game.doCommands).
 //
 // Ввод закрыт, пока идёт анимация поля или ход машин (Game.isBusy). Всё время идёт через Tween.
-// Колонок столько, чтобы кристаллы заполнили всю ширину бокса: клетка по высоте = высота / ROWS.
+// Поле ROWS x COLS занимает весь бокс: клетка = высота / ROWS на ширину / COLS (COLS 0 значит столько колонок,
+// чтобы клетка была почти квадратной).
 // ============================================================================
 
 const Board = {
@@ -41,16 +42,16 @@ const Board = {
 
   // Подогнать под размер canvas. Если число колонок изменилось, поле собирается заново.
   layout() {
-    const cv = Board.canvas, rect = cv.getBoundingClientRect();
+    const cv = Board.canvas, rect = cv.getBoundingClientRect(), M = CONFIG.MATCH3;
     if (!rect.width || !rect.height) return;
     Board.w = rect.width; Board.h = rect.height;
     Board.dpr = Math.min(devicePixelRatio || 1, CONFIG.RENDER.MAX_DPR);
     cv.width = Math.round(Board.w * Board.dpr); cv.height = Math.round(Board.h * Board.dpr);
-    const cols = Math.max(CONFIG.MATCH3.MIN_MATCH + 1, Math.round(Board.w / (Board.h / Board.rows)));   // клетка почти квадратная
+    const cols = M.COLS || Math.max(M.MIN_MATCH + 1, Math.round(Board.w / (Board.h / Board.rows)));   // 0: клетка почти квадратная
     Board.ch = Board.h / Board.rows;
     Board.cw = Board.w / cols;
-    Board.radius = Math.min(Board.cw, Board.ch) * CONFIG.MATCH3.TILE_SIZE / 2;
-    Board.sprites = CONFIG.MATCH3.TILES.map((_, type) => Crystals.sprite(type, Board.radius, Board.dpr));   // картинки кристаллов под этот размер
+    Board.radius = Math.min(Board.cw, Board.ch) * M.TILE_SIZE / 2;
+    Board.sprites = M.TILES.map((_, type) => Crystals.sprite(type, Board.radius, Board.dpr));   // картинки кристаллов под этот размер
     if (!Board.tiles.length || cols !== Board.cols) { Board.cols = cols; Board.build(); }
     else Board.snap();
   },
@@ -71,8 +72,8 @@ const Board = {
   // Новое поле из матрицы типов (если не задана, случайное без готовых линий)
   build(types) {
     types = types || Match3.generate(Board.rows, Board.cols);
-    Board.tiles = types.map((row, r) => row.map((type, c) => Board.makeTile(type, r, c)));
     Board.rows = types.length; Board.cols = types[0].length;
+    Board.tiles = types.map((row, r) => row.map((type, c) => Board.makeTile(type, r, c)));
     Board.selected = null;
   },
 
@@ -119,37 +120,50 @@ const Board = {
     if (!cells.length) { await Board.swapAnim(a, b); Board.animating = false; return; }   // линии нет, откат
 
     // вся цепочка схлопываний (с каскадами) считается по цветам и даёт одну команду
-    const counts = Array(CONFIG.MATCH3.TILES.length).fill(0);
+    const counts = Array(CONFIG.MATCH3.TILES.length).fill(0), flights = [], spot = [0, 0, 0];
     while (cells.length) {
-      Board.count(cells, counts);
+      Board.count(cells, counts, flights, spot);
       await Board.clearAnim(cells);
       await Board.refill();
       cells = Match3.find(Board.tiles);
     }
-    await Board.decide(counts);
+    await Promise.all(flights);                           // все кометы долетели до счётчика
+    await Board.decide(counts, [spot[0] / spot[2], spot[1] / spot[2]]);
     if (!Match3.hasMove(Board.tiles)) await Board.reshuffle();
     Board.snap();
     Board.animating = false;
   },
 
   // Прибавить схлопывающиеся кружки к счёту по цветам. Как только цветов стало больше одного,
-  // HP в разделителе заменяется счётчиком, он обновляется с каждым шагом каскада.
-  count(cells, counts) {
-    for (const [r, c] of cells) counts[Board.tiles[r][c].type]++;
-    if (counts.filter(n => n > 0).length > 1) Hud.tallyShow(counts);
+  // HP в разделителе заменяется счётчиком: то, что схлопнулось раньше, он показывает сразу, а из кристаллов
+  // этого шага в него летят кометы (BoardFx.comet), каждая прибавляет 1. Их Promise копятся в flights.
+  // В spot копятся [сумма x, сумма y, число] схлопнутых кристаллов: оттуда взлетает цвет, если он один.
+  count(cells, counts, flights, spot) {
+    const before = counts.slice();
+    for (const [r, c] of cells) {
+      const t = Board.tiles[r][c];
+      counts[t.type]++; spot[0] += t.x; spot[1] += t.y; spot[2]++;
+    }
+    if (counts.filter(n => n > 0).length < 2) return;
+    if (!Hud.tallyOn()) Hud.tallyShow(before);
+    for (const [r, c] of cells) { const t = Board.tiles[r][c]; flights.push(BoardFx.comet(t.type, t.x, t.y)); }
   },
 
   // Итог цепочки: один цвет срабатывает сразу, а если цветов несколько, срабатывают два самых
   // многочисленных ОДНОВРЕМЕННО (Match3.choose). Если выбор случайный, счётчик это показывает.
-  // Потом счётчик исчезает, HP возвращается, и команды уходят в игру одним ходом.
-  async decide(counts) {
+  // Потом выбранные кристаллы взлетают из счётчика в сцену (BoardFx.reveal), HP возвращается, и, как только
+  // они показались, команды уходят в игру одним ходом (кристаллы растворяются уже во время хода).
+  // Если цвет был один, он так же взлетает, но из середины схлопнутых кристаллов (from, точка поля).
+  async decide(counts, from) {
     const pick = Match3.choose(counts);
     if (!pick.winners.length) return;
     if (counts.filter(n => n > 0).length > 1) {
       if (pick.candidates) { Game.state.log = 'Поровну: случайный выбор'; Hud.refresh(); }
       await Hud.tallyPick(pick.candidates, pick.winners, pick.landing);
+      const shown = BoardFx.reveal(pick.winners);         // берёт места значков, пока счётчик ещё виден
       Hud.tallyHide();
-    }
+      await shown;
+    } else await BoardFx.reveal(pick.winners, from);
     Game.play(pick.winners.map(t => CONFIG.MATCH3.TILES[t].command));
   },
 

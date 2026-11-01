@@ -61,6 +61,15 @@ body { display: flex; align-items: center; justify-content: center; }
 .tally-item.lead { transform: scale(1.18); }                       /* лидирует по числу */
 .tally-item.pick { opacity: 1; transform: scale(1.32); filter: drop-shadow(0 0 6px #fff); }          /* бегущий выбор при равенстве */
 .tally-item.win { opacity: 1; transform: scale(1.38); filter: drop-shadow(0 0 8px #ffd54a); }         /* выбранный цвет */
+/* долетела комета этого цвета: значок и число вспыхивают */
+.tally-item.hit canvas { animation: tally-hit .32s ease-out; }
+.tally-item.hit b { animation: tally-hit-num .32s ease-out; }
+@keyframes tally-hit { from { transform: scale(1.75); filter: brightness(2.2) drop-shadow(0 0 5px #fff); } to { transform: none; filter: none; } }
+@keyframes tally-hit-num { from { transform: scale(1.4); color: #fff8c0; } to { transform: none; } }
+.tally-item b { display: inline-block; }
+
+/* эффекты поля поверх всего экрана (boardfx.js): кометы в счётчик, выбранные кристаллы */
+#fx2d { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 5; }
 
 
 /* нижний бокс: поле match-3 на всю площадь. Размер клетки и число колонок считает board.js */

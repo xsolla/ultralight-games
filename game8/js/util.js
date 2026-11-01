@@ -12,6 +12,7 @@ const Util = {
   easeIn: k => k * k,
   easeOut: k => 1 - Math.pow(1 - k, 3),
   easeInOut: k => k < 0.5 ? 2 * k * k : 1 - Math.pow(-2 * k + 2, 2) / 2,
+  easeOutBack: k => 1 + 2.70158 * Math.pow(k - 1, 3) + 1.70158 * Math.pow(k - 1, 2),   // с перелётом за 1 и возвратом
   linear: k => k,
 
   // Детерминированный генератор (mulberry32): тот же seed даёт ту же последовательность
