@@ -1,25 +1,27 @@
 // ============================================================================
-// board.js — поле match-3: рисует кружки на canvas, принимает клики, анимирует свап, схлопывание,
-// падение и каскады. Правила (поиск линий, ходы, генерация) в match3.js, числа в CONFIG.MATCH3.
+// board.js — поле match-3: рисует кристаллы на canvas, принимает клики, анимирует свап, схлопывание,
+// падение и каскады. Правила (поиск линий, ходы, генерация) в match3.js, вид кристаллов в crystals.js,
+// числа в CONFIG.MATCH3.
 //
-// Ход игрока: клик по кружку выделяет его, клик по соседнему (по горизонтали или вертикали) меняет их
-// местами. Если линии нет, свап откатывается. Если есть, кружки схлопываются, пустоты заполняются
-// падающими кружками, новые линии (каскады) схлопываются дальше, пока поле не успокоится. Все
-// схлопнутые за цепочку кружки считаются по цветам, и в конце:
+// Ход игрока: клик по кристаллу выделяет его, клик по соседнему (по горизонтали или вертикали) меняет их
+// местами. Если линии нет, свап откатывается. Если есть, кристаллы схлопываются, пустоты заполняются
+// падающими, новые линии (каскады) схлопываются дальше, пока поле не успокоится. Все схлопнутые за
+// цепочку кристаллы считаются по цветам, и в конце:
 //   - если схлопнулся один цвет, срабатывает его команда (CONFIG.MATCH3.TILES[].command);
 //   - если цветов несколько, HP в разделителе заменяется счётчиком и ОДНОВРЕМЕННО срабатывают два цвета
-//     с наибольшим числом кружков (Match3.choose, при равенстве случайный выбор через Hud.tallyPick).
+//     с наибольшим числом кристаллов (Match3.choose, при равенстве случайный выбор через Hud.tallyPick).
 // Как складываются две команды в одном ходе, описано в game.js (Game.doCommands).
 //
 // Ввод закрыт, пока идёт анимация поля или ход машин (Game.isBusy). Всё время идёт через Tween.
-// Колонок столько, чтобы кружки заполнили всю ширину бокса: клетка по высоте = высота / ROWS.
+// Колонок столько, чтобы кристаллы заполнили всю ширину бокса: клетка по высоте = высота / ROWS.
 // ============================================================================
 
 const Board = {
   canvas: null, ctx: null,
   w: 0, h: 0, dpr: 1,       // размер в css-пикселях и плотность
   rows: 0, cols: 0, cw: 0, ch: 0,   // сетка и размер клетки
-  tiles: [],                // tiles[r][c] = { type, r, c, x, y, s, a } или null
+  radius: 0, sprites: null, // радиус кристалла и его картинки по типам (crystals.js)
+  tiles: [],                // tiles[r][c] = { type, r, c, x, y, s, a, phase, period, seed } или null
   selected: null,
   animating: false,         // идёт анимация поля
   lockedShown: false,
@@ -47,6 +49,8 @@ const Board = {
     const cols = Math.max(CONFIG.MATCH3.MIN_MATCH + 1, Math.round(Board.w / (Board.h / Board.rows)));   // клетка почти квадратная
     Board.ch = Board.h / Board.rows;
     Board.cw = Board.w / cols;
+    Board.radius = Math.min(Board.cw, Board.ch) * CONFIG.MATCH3.TILE_SIZE / 2;
+    Board.sprites = CONFIG.MATCH3.TILES.map((_, type) => Crystals.sprite(type, Board.radius, Board.dpr));   // картинки кристаллов под этот размер
     if (!Board.tiles.length || cols !== Board.cols) { Board.cols = cols; Board.build(); }
     else Board.snap();
   },
@@ -58,7 +62,10 @@ const Board = {
 
   // ---- сборка поля ----
   makeTile(type, r, c) {
-    return { type, r, c, x: Board.cellX(c), y: Board.cellY(r), s: 1, a: 1 };
+    const S = CONFIG.MATCH3.CRYSTAL.SPARKLE;
+    // phase, period и seed задают периодический блик этого кристалла (crystals.js)
+    return { type, r, c, x: Board.cellX(c), y: Board.cellY(r), s: 1, a: 1,
+      phase: Math.random() * (S.PERIOD + S.PERIOD_RANGE), period: S.PERIOD + Math.random() * S.PERIOD_RANGE, seed: Math.random() * 100 };
   },
 
   // Новое поле из матрицы типов (если не задана, случайное без готовых линий)
@@ -205,16 +212,19 @@ const Board = {
     const locked = Board.locked();
     if (locked !== Board.lockedShown) { Board.lockedShown = locked; Board.canvas.style.opacity = locked ? M.LOCKED_ALPHA : 1; }
 
-    const base = Math.min(Board.cw, Board.ch) * M.TILE_SIZE / 2;
-    g.lineWidth = 2;
+    const time = Main.simT;                              // время для бликов (стоит вместе с игрой на паузе)
     for (const row of Board.tiles) for (const t of row) {
       if (!t || t.s <= 0) continue;
-      const sel = t === Board.selected, r = base * t.s * (sel ? M.SELECT_SCALE : 1);
+      const sprite = Board.sprites && Board.sprites[t.type];
+      if (!sprite) continue;
+      const sel = t === Board.selected, scale = t.s * (sel ? M.SELECT_SCALE : 1), size = sprite.size * scale;
       g.globalAlpha = t.a;
-      g.beginPath(); g.arc(t.x, t.y, r, 0, Math.PI * 2);
-      g.fillStyle = M.TILES[t.type].color; g.fill();
-      g.strokeStyle = M.OUTLINE; g.stroke();
-      if (sel) { g.beginPath(); g.arc(t.x, t.y, r + 3, 0, Math.PI * 2); g.lineWidth = 3; g.strokeStyle = M.SELECT_RING; g.stroke(); g.lineWidth = 2; }
+      g.drawImage(sprite.canvas, t.x - size / 2, t.y - size / 2, size, size);      // кристалл
+      Crystals.glint(g, t.x, t.y, Board.radius * scale, t, time);                  // периодический блик
+      if (sel) {                                                                   // выделение: контур по форме кристалла
+        Crystals.trace(g, t.type, t.x, t.y, Board.radius * scale * 1.12);
+        g.lineWidth = 3; g.lineJoin = 'round'; g.strokeStyle = M.SELECT_RING; g.stroke();
+      }
     }
     g.globalAlpha = 1;
   },

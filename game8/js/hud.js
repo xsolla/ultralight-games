@@ -26,11 +26,15 @@ const Hud = {
     Hud.hpText = document.getElementById('hp-text');
     if (Hud.divider) Hud.divider.style.setProperty('--hp-blink', CONFIG.UI.HP_BAR.BLINK_PERIOD + 's');
 
-    const tally = document.getElementById('tally');
-    if (tally) Hud.tallyItems = CONFIG.MATCH3.TILES.map(t => {
+    // значки счётчика это те же кристаллы, что на поле (форма показывает команду)
+    const tally = document.getElementById('tally'), dpr = Math.min(devicePixelRatio || 1, CONFIG.RENDER.MAX_DPR);
+    if (tally) Hud.tallyItems = CONFIG.MATCH3.TILES.map((t, type) => {
       const el = document.createElement('div');
       el.className = 'tally-item';
-      el.innerHTML = `<i style="background:${t.color}"></i><b>0</b>`;
+      const icon = Crystals.sprite(type, CONFIG.MATCH3.TALLY.ICON_R, dpr);
+      icon.canvas.style.width = icon.canvas.style.height = icon.size + 'px';
+      el.appendChild(icon.canvas);
+      el.insertAdjacentHTML('beforeend', '<b>0</b>');
       tally.appendChild(el);
       return el;
     });
