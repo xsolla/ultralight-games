@@ -2,7 +2,7 @@
 // cars.js — процедурные машины и их покадровое оживление. Моделей нет: каждая машина собирается из
 // профиля кузова (CONFIG.CAR_TYPES), стёкол, колёс, фар, габаритов и бамперов.
 //
-//   Cars.make(type, color)  -> { holder, body, bodyMat, wheels, lamps, r, height }
+//   Cars.make(type, color)  -> { holder, body, hull, bodyMat, wheels, lamps, r, height }   (hull: меш кузова)
 //   Cars.update(car, dt, t, busy)   каждый кадр: фонари, изгиб дороги, колёса, покачивание
 //
 // Иерархия: car.node (накладывает изгиб дороги) > car.holder (логическая позиция в сетке, её двигает
@@ -142,7 +142,7 @@ const Cars = {
 
     g.rotation.y = Math.PI / 2;      // локальный +x (перёд) -> мировой -z (вперёд)
     const holder = new THREE.Group(); holder.add(g);
-    return { holder, body: g, bodyMat, wheels, lamps: L, r: T.r, height: T.curve.reduce((m, p) => Math.max(m, p[1]), 0) };
+    return { holder, body: g, hull: body, bodyMat, wheels, lamps: L, r: T.r, height: T.curve.reduce((m, p) => Math.max(m, p[1]), 0) };
   },
 
   // Покадровое оживление машины. busy: идёт ли ход (тогда покачивание корпуса не мешает анимациям).

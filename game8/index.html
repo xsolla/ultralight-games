@@ -1,9 +1,9 @@
 <!doctype html>
-<html lang="ru">
+<html lang="en">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
-  <title>Match-3 Racing</title>
+  <title>Puzzle and Racing</title>
   <link rel="stylesheet" href="css/styles.css" />
 
   <!-- three.js: единственная внешняя зависимость. Модуль подключается с CDN и кладётся в window.THREE,
@@ -35,12 +35,51 @@
     <div id="panel">
       <canvas id="board"></canvas>
     </div>
+
+    <!-- Конец партии поверх всего: итог, ходы, рекорд и кнопки "Заново" и "Меню" (hud.js) -->
+    <div id="over">
+      <div class="over-box">
+        <b id="over-title"></b>
+        <span id="over-text"></span>
+        <span id="over-note"></span>
+        <div class="over-actions">
+          <button id="over-restart" type="button">Play again</button>
+          <button id="over-menu" type="button">Menu</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Титульный экран: логотип Xsolla, название, выбор сложности, лучшие результаты (title.js).
+         SVG логотипа и значков кнопок вставляет chrome.js: в HTML не должно быть <svg>. -->
+    <div id="title" class="show">
+      <div id="title-logo"></div>
+      <div class="title-main">
+        <div id="title-gems"></div>
+        <h1 class="title-name"><span class="t-puzzle">Puzzle</span><span class="t-and">and</span><span class="t-racing">Racing</span></h1>
+        <div class="title-label">Difficulty</div>
+        <div id="title-levels"></div>
+        <button id="title-best" type="button">Best results</button>
+        <p id="title-rules"></p>
+      </div>
+      <!-- Окно лучших результатов поверх титульного экрана -->
+      <div id="best">
+        <div class="best-box">
+          <b class="best-title">Best results</b>
+          <div id="best-list"></div>
+          <p id="best-note"></p>
+          <button id="best-back" type="button">Back</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Кнопки звука, выхода и полного экрана (chrome.js): выше всех окон, работают везде -->
+    <div id="chrome"></div>
   </div>
 
   <!-- Порядок выполнения: модуль three, затем обычные скрипты по зависимостям. Модуль и defer-скрипты
        выполняются по порядку в документе, так что к main.js THREE уже есть.
        constants -> util, tween -> сцена и камера -> мир (изгиб, дорога, обочина, развилки)
-       -> сущности (машины, значки, эффекты) -> правила и поле match-3 -> интерфейс и ввод -> main. -->
+       -> сущности (машины, значки, эффекты) -> правила, поведение противников и поле match-3 -> интерфейс (HUD, результаты, кнопки, титульный экран) и ввод -> main. -->
   <script type="module">
     import * as THREE from 'three';
     window.THREE = THREE;
@@ -58,11 +97,15 @@
   <script defer src="js/fx.js"></script>
   <script defer src="js/camera.js"></script>
   <script defer src="js/game.js"></script>
+  <script defer src="js/ai.js"></script>
   <script defer src="js/match3.js"></script>
   <script defer src="js/crystals.js"></script>
   <script defer src="js/board.js"></script>
   <script defer src="js/boardfx.js"></script>
   <script defer src="js/hud.js"></script>
+  <script defer src="js/results.js"></script>
+  <script defer src="js/chrome.js"></script>
+  <script defer src="js/title.js"></script>
   <script defer src="js/input.js"></script>
   <script defer src="js/main.js"></script>
 </body>

@@ -6,9 +6,8 @@
 // живёт в board.js.
 //
 //   Match3.find(grid)             все клетки в линиях из MIN_MATCH и более одного цвета, [[r, c], ...]
-//   Match3.hasMove(grid)          есть ли хоть один свап соседей, дающий линию
 //   Match3.choose(counts)         какие цвета срабатывают по итогам цепочки (один или два)
-//   Match3.generate(rows, cols)   новое поле из типов без готовых линий, но с ходом
+//   Match3.generate(rows, cols)   новое поле из типов без готовых линий
 // ============================================================================
 
 const Match3 = {
@@ -36,32 +35,24 @@ const Match3 = {
     const t = grid[r1][c1]; grid[r1][c1] = grid[r2][c2]; grid[r2][c2] = t;
   },
 
-  // Есть ли хоть один свап соседей по горизонтали или вертикали, после которого появляется линия
-  hasMove(grid) {
-    for (let r = 0; r < grid.length; r++) for (let c = 0; c < grid[0].length; c++) {
-      for (const [dr, dc] of [[0, 1], [1, 0]]) {
-        if (!Match3.inside(grid, r + dr, c + dc)) continue;
-        Match3.swap(grid, r, c, r + dr, c + dc);
-        const ok = Match3.find(grid).length > 0;
-        Match3.swap(grid, r, c, r + dr, c + dc);
-        if (ok) return true;
-      }
-    }
-    return false;
-  },
-
   randomType: () => Math.random() * CONFIG.MATCH3.TILES.length | 0,
 
   // Какие цвета срабатывают по итогам цепочки. counts[i] это сколько кристаллов цвета i схлопнулось.
   // Один цвет срабатывает один. Несколько: срабатывают два самых многочисленных одновременно.
   // Если на место в паре претендуют несколько равных, выбор случайный, но противоположные пары
-  // (F и B, L и R) исключаются, пока есть другие. Возвращает { winners, candidates, landing }:
-  // winners это один или два цвета, candidates это среди кого шёл случайный выбор (или null),
-  // landing это на ком выбор остановился (для показа).
+  // (F и B, L и R) исключаются, пока есть другие. Поблажка игроку: если случай выбирает между вариантами
+  // с тормозом (B) и без, варианты без тормоза вместе выпадают с шансом BACK_AVOID.
+  // Возвращает { winners, candidates, landing }: winners это один или два цвета, candidates это среди кого
+  // шёл случайный выбор (или null), landing это на ком выбор остановился (для показа).
   choose(counts) {
     const M = CONFIG.MATCH3, cmd = t => [...M.TILES[t].command];
     const opposite = (a, b) => cmd(a).some(x => cmd(b).includes(M.OPPOSITE[x]));   // у цвета может быть несколько команд
-    const pickOne = list => list[Math.random() * list.length | 0];
+    const back = t => cmd(t).includes('B');
+    const pickOne = (list, hasBack) => {
+      const plain = list.filter(x => !hasBack(x)), braking = list.filter(hasBack);
+      const from = !plain.length || !braking.length ? list : Math.random() < M.BACK_AVOID ? plain : braking;
+      return from[Math.random() * from.length | 0];
+    };
     const types = counts.map((n, i) => i).filter(i => counts[i] > 0);
     if (types.length <= 1) return { winners: types, candidates: null, landing: null };
 
@@ -73,7 +64,7 @@ const Match3 = {
       const pairs = [];
       for (let i = 0; i < top.length; i++) for (let j = i + 1; j < top.length; j++) pairs.push([top[i], top[j]]);
       const good = pairs.filter(p => !opposite(p[0], p[1])), pool = good.length ? good : pairs;
-      const pair = pickOne(pool);
+      const pair = pickOne(pool, p => back(p[0]) || back(p[1]));
       return { winners: pair, candidates: [...new Set(pool.flat())], landing: pair[0] };
     }
 
@@ -82,27 +73,24 @@ const Match3 = {
     const tied = rest.filter(t => counts[t] === second);
     if (tied.length === 1) return { winners: [top[0], tied[0]], candidates: null, landing: null };
     const good = tied.filter(t => !opposite(top[0], t)), pool = good.length ? good : tied;
-    const chosen = pickOne(pool);
+    const chosen = pickOne(pool, back);
     return { winners: [top[0], chosen], candidates: pool.length > 1 ? pool : null, landing: chosen };
   },
 
-  // Поле типов rows x cols без готовых линий, но хотя бы с одним ходом
+  // Поле типов rows x cols без готовых линий. Ход есть всегда: ведением можно собрать любую линию.
   generate(rows, cols) {
-    const N = CONFIG.MATCH3.TILES.length, back = [[0, -1], [-1, 0], [-1, -1], [-1, 1]];
-    for (let attempt = 0; attempt < 100; attempt++) {
-      const grid = Array.from({ length: rows }, () => Array(cols).fill(null));
-      for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
-        // цвета, которые достроили бы две соседние клетки назад по любому направлению до линии из трёх
-        const banned = new Set();
-        for (const [dr, dc] of back) {
-          const a = Match3.typeAt(grid, r + dr, c + dc);
-          if (a >= 0 && a === Match3.typeAt(grid, r + dr * 2, c + dc * 2)) banned.add(a);
-        }
-        const options = [...Array(N).keys()].filter(t => !banned.has(t));
-        grid[r][c] = { type: options[Math.random() * options.length | 0] };
+    const all = [...CONFIG.MATCH3.TILES.keys()], back = [[0, -1], [-1, 0], [-1, -1], [-1, 1]];
+    const grid = Array.from({ length: rows }, () => Array(cols).fill(null));
+    for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
+      // цвета, которые достроили бы две соседние клетки назад по любому направлению до линии из трёх
+      const banned = new Set();
+      for (const [dr, dc] of back) {
+        const a = Match3.typeAt(grid, r + dr, c + dc);
+        if (a >= 0 && a === Match3.typeAt(grid, r + dr * 2, c + dc * 2)) banned.add(a);
       }
-      if (Match3.hasMove(grid)) return grid.map(row => row.map(t => t.type));
+      const allowed = all.filter(t => !banned.has(t)), options = allowed.length ? allowed : all;
+      grid[r][c] = { type: options[Math.random() * options.length | 0] };
     }
-    return Array.from({ length: rows }, () => Array.from({ length: cols }, () => Match3.randomType()));   // запасной вариант
+    return grid.map(row => row.map(t => t.type));
   },
 };

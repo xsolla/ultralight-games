@@ -6,15 +6,25 @@
 // HP игрока это полоса в разделителе: цвет плавно идёт от зелёного к красному, а на 20% HP и ниже
 // полоса красная и мигает (CONFIG.UI.HP_BAR).
 //
-// Когда за один свап (с каскадом) схлопнулось несколько цветов, вместо HP в разделителе показывается
+// Когда за один ход (с каскадом) схлопнулось несколько цветов, вместо HP в разделителе показывается
 // счётчик кристаллов по цветам (tallyShow). В конце цепочки он подсвечивает двух победителей (tallyPick),
 // при случайном выборе показывает бегущую подсветку, и HP возвращается на место (tallyHide).
+//
+// Конец партии (showOver): окно поверх всей рамки с итогом (поражение или победа), сложностью, числом ходов,
+// местом в лучших результатах и кнопками "Play again" и "Menu" (титульный экран). Все тексты игры на английском.
 // ============================================================================
 
 const Hud = {
   fps: 0,
   el: null,          // строка состояния поверх сцены
   errEl: null,
+  overEl: null,      // окно конца партии
+  // итоги партии (Game.state.over): заголовок и пояснение
+  OVER_TEXT: {
+    crash: () => ['Defeat', 'Your car was wrecked.'],
+    escape: () => ['Defeat', `A rival broke away: it got more than ${CONFIG.RULES.LOSE_LEAD} rows ahead of you.`],
+    win: () => ['Victory!', 'No rivals in sight: all of them are wrecked or left behind.'],
+  },
   divider: null, hpFill: null, hpText: null,
   tallyItems: [],    // по одному элементу на цвет кристалла
   tallyCounts: [],   // числа, которые сейчас показывает счётчик
@@ -26,6 +36,10 @@ const Hud = {
     Hud.hpFill = document.getElementById('hp-fill');
     Hud.hpText = document.getElementById('hp-text');
     if (Hud.divider) Hud.divider.style.setProperty('--hp-blink', CONFIG.UI.HP_BAR.BLINK_PERIOD + 's');
+    Hud.overEl = document.getElementById('over');
+    const restart = document.getElementById('over-restart'), menu = document.getElementById('over-menu');
+    if (restart) restart.addEventListener('click', () => Game.act('X'));
+    if (menu) menu.addEventListener('click', () => Game.stop());
 
     // значки счётчика это те же кристаллы, что на поле (форма показывает команду)
     const tally = document.getElementById('tally'), dpr = Math.min(devicePixelRatio || 1, CONFIG.RENDER.MAX_DPR);
@@ -118,11 +132,32 @@ const Hud = {
     if (!p) return;
     Hud.updateHp();
     if (!Hud.el) return;
-    const alive = S.cars.filter(c => c.alive && !c.isPlayer).length;
+    const foes = Game.foes(), lead = foes.length ? Math.max(...foes.map(Game.ahead)) : 0;
     Hud.el.textContent =
-      `Ход ${S.turn}   ряд ${S.playerRow}/${CONFIG.TRACK.ROWS - 1}   противников: ${alive}\n` +
-      `Намерения: ${S.reveal ? 'показаны' : 'скрыты'}   ${Hud.fps} fps\n${S.log}`;
+      `Turn ${S.turn}   row ${S.playerRow}/${CONFIG.TRACK.ROWS - 1}   rivals: ${foes.length}   leader ahead: ${lead}/${CONFIG.RULES.LOSE_LEAD}\n` +
+      `${Title.LEVEL_NAME[S.level]}   intents: ${S.reveal ? 'shown' : 'hidden'}   ${Hud.fps} fps\n${S.log}`;
   },
+
+  // ---- Конец партии ----
+  // info = { turns, place, level }: сколько ходов, место среди лучших побед (results.js, -1 не попала), сложность
+  showOver(reason, info) {
+    if (!Hud.overEl) return;
+    const [title, text] = Hud.OVER_TEXT[reason]();
+    document.getElementById('over-title').textContent = title;
+    document.getElementById('over-text').textContent = text;
+    const note = document.getElementById('over-note');
+    if (note) {
+      const parts = info ? [Title.LEVEL_NAME[info.level], Title.turns(info.turns)] : [];
+      if (info && info.place === 0) parts.push('new record!');
+      else if (info && info.place > 0) parts.push(`${Title.ordinal(info.place + 1)} best result`);
+      note.textContent = parts.join(' · ');
+      note.classList.toggle('record', !!info && info.place === 0);
+    }
+    Hud.overEl.classList.toggle('win', reason === 'win');
+    Hud.overEl.classList.add('show');
+  },
+
+  hideOver() { if (Hud.overEl) Hud.overEl.classList.remove('show', 'win'); },
 
   showError(message) {
     if (!Hud.errEl) return;

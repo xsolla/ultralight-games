@@ -1,15 +1,17 @@
 // ============================================================================
-// board.js — поле match-3: рисует кристаллы на canvas, принимает клики, анимирует свап, схлопывание,
-// падение и каскады. Правила (поиск линий, ходы, генерация) в match3.js, вид кристаллов в crystals.js,
-// числа в CONFIG.MATCH3.
+// board.js — поле match-3: рисует кристаллы на canvas, принимает ведение кристалла, анимирует
+// схлопывание, падение и каскады. Правила (поиск линий, генерация) в match3.js, вид кристаллов в
+// crystals.js, числа в CONFIG.MATCH3.
 //
-// Ход игрока: клик по кристаллу выделяет его, клик по соседнему (по горизонтали или вертикали) меняет их
-// местами. Если линии нет, свап откатывается. Если есть, кристаллы схлопываются, пустоты заполняются
-// падающими, новые линии (каскады) схлопываются дальше, пока поле не успокоится. Все схлопнутые за
-// цепочку кристаллы считаются по цветам, и в конце:
+// Ход игрока как в Puzzle & Dragons: взять кристалл (нажать) и вести его по полю. Каждый кристалл, в
+// клетку которого он входит (по горизонтали, вертикали или диагонали, DRAG.DIAGONAL), меняется с ним
+// местами. С первого шага идёт время (DRAG.TIME, кольцо вокруг взятого кристалла). Отпустил или время
+// кончилось: линии схлопываются, пустоты заполняются падающими, новые линии (каскады) схлопываются
+// дальше, пока поле не успокоится. Все схлопнутые за цепочку кристаллы считаются по цветам, и в конце:
 //   - если схлопнулся один цвет, срабатывает его команда (CONFIG.MATCH3.TILES[].command);
 //   - если цветов несколько, HP в разделителе заменяется счётчиком и ОДНОВРЕМЕННО срабатывают два цвета
-//     с наибольшим числом кристаллов (Match3.choose, при равенстве случайный выбор через Hud.tallyPick).
+//     с наибольшим числом кристаллов (Match3.choose, при равенстве случайный выбор через Hud.tallyPick);
+//   - если линий нет вовсе, ход потрачен впустую (DRAG.EMPTY_SKIP), противники ходят.
 // Как складываются две команды в одном ходе, описано в game.js (Game.doCommands).
 //
 // Ввод закрыт, пока идёт анимация поля или ход машин (Game.isBusy). Всё время идёт через Tween.
@@ -22,17 +24,19 @@ const Board = {
   w: 0, h: 0, dpr: 1,       // размер в css-пикселях и плотность
   rows: 0, cols: 0, cw: 0, ch: 0,   // сетка и размер клетки
   radius: 0, sprites: null, // радиус кристалла и его картинки по типам (crystals.js)
-  tiles: [],                // tiles[r][c] = { type, r, c, x, y, s, a, phase, period, seed } или null
-  selected: null,
+  tiles: [],                // tiles[r][c] = { type, r, c, x, y, s, a, phase, period, seed, glide } или null
+  drag: null,               // взятый кристалл: { tile, x, y, pointer, moved, left } или null
   animating: false,         // идёт анимация поля
   lockedShown: false,
 
   init() {
-    Board.canvas = document.getElementById('board');
-    Board.ctx = Board.canvas.getContext('2d');
+    const cv = Board.canvas = document.getElementById('board');
+    Board.ctx = cv.getContext('2d');
     Board.rows = CONFIG.MATCH3.ROWS;
-    new ResizeObserver(Board.layout).observe(Board.canvas);
-    Board.canvas.addEventListener('pointerdown', Board.onPointer);
+    new ResizeObserver(Board.layout).observe(cv);
+    cv.addEventListener('pointerdown', Board.onDown);
+    cv.addEventListener('pointermove', Board.onMove);
+    for (const ev of ['pointerup', 'pointercancel', 'lostpointercapture']) cv.addEventListener(ev, Board.onUp);
     Board.layout();
   },
 
@@ -74,12 +78,11 @@ const Board = {
     types = types || Match3.generate(Board.rows, Board.cols);
     Board.rows = types.length; Board.cols = types[0].length;
     Board.tiles = types.map((row, r) => row.map((type, c) => Board.makeTile(type, r, c)));
-    Board.selected = null;
+    Board.drag = null;
   },
 
   // Новая партия: другое поле, кристаллы "вырастают"
   async reset() {
-    Board.selected = null;
     Hud.tallyHide();
     Board.animating = true;
     Board.build();
@@ -90,36 +93,83 @@ const Board = {
   popIn() {
     const all = Board.tiles.flat();
     for (const t of all) { t.s = 0; t.a = 0; }
-    return Tween.run(CONFIG.MATCH3.SHUFFLE, k => { for (const t of all) { t.s = k; t.a = k; } });
+    return Tween.run(CONFIG.MATCH3.POP_IN, k => { for (const t of all) { t.s = k; t.a = k; } });
   },
 
-  // ---- ввод ----
+  // ---- ввод: ведение кристалла ----
   locked: () => Board.animating || Game.isBusy(),
 
-  onPointer(e) {
+  point(e) {
     const rect = Board.canvas.getBoundingClientRect();
-    Board.click(Math.floor((e.clientY - rect.top) / Board.ch), Math.floor((e.clientX - rect.left) / Board.cw));
+    return [e.clientX - rect.left, e.clientY - rect.top];
   },
 
-  // Клик по клетке (ряд, колонка). Выделяет кристалл, а второй клик по соседнему делает свап.
-  click(r, c) {
-    if (Board.locked() || !Match3.inside(Board.tiles, r, c)) return;
-    const t = Board.tiles[r][c], sel = Board.selected;
-    if (!t) return;
-    if (!sel) { Board.selected = t; return; }
-    if (sel === t) { Board.selected = null; return; }
-    if (Math.abs(sel.r - t.r) + Math.abs(sel.c - t.c) === 1) { Board.selected = null; Board.trySwap(sel, t); return; }
-    Board.selected = t;                                   // не сосед: выделение переходит на новый кристалл
+  onDown(e) {
+    const [x, y] = Board.point(e);
+    if (Board.pick(Math.floor(y / Board.ch), Math.floor(x / Board.cw), x, y, e.pointerId)) Board.canvas.setPointerCapture(e.pointerId);
+  },
+  onMove(e) { if (Board.drag && Board.drag.pointer === e.pointerId) Board.dragTo(...Board.point(e)); },
+  onUp(e) { if (Board.drag && Board.drag.pointer === e.pointerId) Board.drop(); },
+
+  // Взять кристалл в клетке (r, c), палец в точке (x, y)
+  pick(r, c, x, y, pointer) {
+    if (Board.locked() || Board.drag || !Match3.inside(Board.tiles, r, c) || !Board.tiles[r][c]) return false;
+    Board.drag = { tile: Board.tiles[r][c], x, y, pointer, moved: false, left: 1 };
+    return true;
+  },
+
+  // Палец в точке (x, y): взятый кристалл идёт за ним. В клетку он входит, только когда палец во внутренней
+  // её части (DRAG.CAPTURE), так что, срезая угол, он не задевает соседей. Если палец проскочил несколько
+  // клеток, кристалл проходит их по шагу, меняясь с каждым кристаллом на пути.
+  dragTo(x, y) {
+    const d = Board.drag, D = CONFIG.MATCH3.DRAG;
+    d.x = Util.clamp(x, 0, Board.w); d.y = Util.clamp(y, 0, Board.h);
+    const r = Util.clamp(Math.floor(d.y / Board.ch), 0, Board.rows - 1), c = Util.clamp(Math.floor(d.x / Board.cw), 0, Board.cols - 1);
+    if (Math.abs(d.x - Board.cellX(c)) > Board.cw * D.CAPTURE / 2 || Math.abs(d.y - Board.cellY(r)) > Board.ch * D.CAPTURE / 2) return;
+    while (d.tile.r !== r || d.tile.c !== c) {
+      let dr = Math.sign(r - d.tile.r), dc = Math.sign(c - d.tile.c);
+      if (!D.DIAGONAL && dr && dc) { if (Math.abs(r - d.tile.r) >= Math.abs(c - d.tile.c)) dc = 0; else dr = 0; }
+      Board.shift(d.tile.r + dr, d.tile.c + dc);
+    }
+  },
+
+  // Взятый кристалл переходит в клетку (r, c), кристалл оттуда переезжает на его место.
+  // Первый шаг запускает время на ведение: кончилось, и кристалл отпускается сам.
+  shift(r, c) {
+    const d = Board.drag, t = d.tile, other = Board.tiles[r][c];
+    Match3.swap(Board.tiles, t.r, t.c, r, c);
+    other.r = t.r; other.c = t.c; t.r = r; t.c = c;
+    Board.glide(other, CONFIG.MATCH3.DRAG.SWAP);
+    if (d.moved) return;
+    d.moved = true;
+    Tween.run(CONFIG.MATCH3.DRAG.TIME, k => { d.left = 1 - k; }, Util.linear).then(() => { if (Board.drag === d) Board.drop(); });
+  },
+
+  // Отпустить: кристалл встаёт в свою клетку, и, если его вели, поле схлопывается
+  async drop() {
+    const d = Board.drag;
+    Board.drag = null;
+    Board.animating = true;
+    d.tile.x = d.x; d.tile.y = d.y;
+    await Board.glide(d.tile, CONFIG.MATCH3.DRAG.DROP);
+    if (d.moved) await Board.resolve();
+    Board.animating = false;
+  },
+
+  // Отладка без мыши: провести кристалл по клеткам path = [[r, c], ...] (первая клетка это взятый) и отпустить
+  async swipe(path) {
+    const [[r0, c0], ...rest] = path;
+    if (!Board.pick(r0, c0, Board.cellX(c0), Board.cellY(r0), null)) return;
+    for (const [r, c] of rest) Board.dragTo(Board.cellX(c), Board.cellY(r));
+    await Board.drop();
   },
 
   // ---- ход ----
-  async trySwap(a, b) {
-    Board.animating = true;
-    await Board.swapAnim(a, b);
+  // Поле после ведения: вся цепочка схлопываний (с каскадами) считается по цветам и даёт один ход
+  // (одну или две команды). Нет ни одной линии: ход потрачен впустую (DRAG.EMPTY_SKIP).
+  async resolve() {
     let cells = Match3.find(Board.tiles);
-    if (!cells.length) { await Board.swapAnim(a, b); Board.animating = false; return; }   // линии нет, откат
-
-    // вся цепочка схлопываний (с каскадами) считается по цветам и даёт один ход (одну или две команды)
+    if (!cells.length) { if (CONFIG.MATCH3.DRAG.EMPTY_SKIP) Game.play(['S']); return; }
     const counts = Array(CONFIG.MATCH3.TILES.length).fill(0), flights = [], spot = [0, 0, 0];
     while (cells.length) {
       Board.count(cells, counts, flights, spot);
@@ -129,9 +179,7 @@ const Board = {
     }
     await Promise.all(flights);                           // все кометы долетели до счётчика
     await Board.decide(counts, [spot[0] / spot[2], spot[1] / spot[2]]);
-    if (!Match3.hasMove(Board.tiles)) await Board.reshuffle();
     Board.snap();
-    Board.animating = false;
   },
 
   // Прибавить схлопывающиеся кристаллы к счёту по цветам. Как только цветов стало больше одного,
@@ -158,7 +206,7 @@ const Board = {
     const pick = Match3.choose(counts);
     if (!pick.winners.length) return;
     if (counts.filter(n => n > 0).length > 1) {
-      if (pick.candidates) { Game.state.log = 'Поровну: случайный выбор'; Hud.refresh(); }
+      if (pick.candidates) { Game.state.log = 'Tie: random pick'; Hud.refresh(); }
       await Hud.tallyPick(pick.candidates, pick.winners, pick.landing);
       const shown = BoardFx.reveal(pick.winners);         // берёт места значков, пока счётчик ещё виден
       Hud.tallyHide();
@@ -168,14 +216,10 @@ const Board = {
   },
 
   // ---- анимации ----
-  swapAnim(a, b) {
-    Match3.swap(Board.tiles, a.r, a.c, b.r, b.c);
-    [a.r, b.r] = [b.r, a.r]; [a.c, b.c] = [b.c, a.c];
-    const ax = a.x, ay = a.y, bx = b.x, by = b.y, ax1 = Board.cellX(a.c), ay1 = Board.cellY(a.r), bx1 = Board.cellX(b.c), by1 = Board.cellY(b.r);
-    return Tween.run(CONFIG.MATCH3.SWAP, k => {
-      a.x = ax + (ax1 - ax) * k; a.y = ay + (ay1 - ay) * k;
-      b.x = bx + (bx1 - bx) * k; b.y = by + (by1 - by) * k;
-    }, Util.easeInOut);
+  // Кристалл едет из текущей точки в центр своей клетки. Новая поездка того же кристалла отменяет прежнюю.
+  glide(t, dur) {
+    const id = t.glide = (t.glide || 0) + 1, x0 = t.x, y0 = t.y, x1 = Board.cellX(t.c), y1 = Board.cellY(t.r);
+    return Tween.run(dur, k => { if (t.glide === id) { t.x = x0 + (x1 - x0) * k; t.y = y0 + (y1 - y0) * k; } });
   },
 
   async clearAnim(cells) {
@@ -208,14 +252,6 @@ const Board = {
     }));
   },
 
-  // Нет ходов: кристаллы исчезают и поле собирается заново
-  async reshuffle() {
-    const all = Board.tiles.flat(), types = Match3.generate(Board.rows, Board.cols);
-    await Tween.run(CONFIG.MATCH3.SHUFFLE / 2, k => { for (const t of all) { t.s = 1 - k; t.a = 1 - k; } });
-    all.forEach(t => { t.type = types[t.r][t.c]; });
-    await Tween.run(CONFIG.MATCH3.SHUFFLE / 2, k => { for (const t of all) { t.s = k; t.a = k; } });
-  },
-
   // ---- отрисовка ----
   draw() {
     const M = CONFIG.MATCH3, g = Board.ctx;
@@ -226,20 +262,33 @@ const Board = {
     const locked = Board.locked();
     if (locked !== Board.lockedShown) { Board.lockedShown = locked; Board.canvas.style.opacity = locked ? M.LOCKED_ALPHA : 1; }
 
-    const time = Main.simT;                              // время для бликов (стоит вместе с игрой на паузе)
+    const time = Main.simT, d = Board.drag;               // время для бликов (стоит вместе с игрой на паузе)
     for (const row of Board.tiles) for (const t of row) {
-      if (!t || t.s <= 0) continue;
-      const sprite = Board.sprites && Board.sprites[t.type];
-      if (!sprite) continue;
-      const sel = t === Board.selected, scale = t.s * (sel ? M.SELECT_SCALE : 1), size = sprite.size * scale;
-      g.globalAlpha = t.a;
-      g.drawImage(sprite.canvas, t.x - size / 2, t.y - size / 2, size, size);      // кристалл
-      Crystals.glint(g, t.x, t.y, Board.radius * scale, t, time);                  // периодический блик
-      if (sel) {                                                                   // выделение: контур по форме кристалла
-        Crystals.trace(g, t.type, t.x, t.y, Board.radius * scale * 1.12);
-        g.lineWidth = 3; g.lineJoin = 'round'; g.strokeStyle = M.SELECT_RING; g.stroke();
-      }
+      if (!t || t.s <= 0 || (d && t === d.tile)) continue;
+      Board.drawTile(t, t.x, t.y, t.s, t.a, time);
     }
+    if (d) Board.drawHeld(d, time);
     g.globalAlpha = 1;
+  },
+
+  drawTile(t, x, y, scale, alpha, time) {
+    const g = Board.ctx, sprite = Board.sprites && Board.sprites[t.type];
+    if (!sprite) return;
+    const size = sprite.size * scale;
+    g.globalAlpha = alpha;
+    g.drawImage(sprite.canvas, x - size / 2, y - size / 2, size, size);         // кристалл
+    Crystals.glint(g, x, y, Board.radius * scale, t, time);                     // периодический блик
+  },
+
+  // Взятый кристалл: контур клетки, куда он ляжет, сам кристалл под пальцем и кольцо оставшегося времени
+  drawHeld(d, time) {
+    const g = Board.ctx, D = CONFIG.MATCH3.DRAG, T = D.TIMER, t = d.tile;
+    g.globalAlpha = 1;
+    Crystals.trace(g, t.type, Board.cellX(t.c), Board.cellY(t.r), Board.radius);
+    g.lineWidth = 2; g.lineJoin = 'round'; g.strokeStyle = D.SLOT; g.stroke();
+    Board.drawTile(t, d.x, d.y, D.HOLD_SCALE, D.HOLD_ALPHA, time);
+    g.globalAlpha = 1;
+    g.beginPath(); g.arc(d.x, d.y, Board.radius * T.R, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * d.left);
+    g.lineWidth = T.WIDTH; g.lineCap = 'round'; g.strokeStyle = d.left <= T.LOW_AT ? T.LOW : T.COLOR; g.stroke();
   },
 };

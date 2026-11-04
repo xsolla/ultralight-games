@@ -2,7 +2,7 @@
 // main.js — точка входа: собирает всё, запускает главный цикл. Грузится последним.
 //
 // Порядок инициализации важен: сцена -> изгиб -> дорога -> обочина -> развилки -> машины, значки,
-// эффекты -> камера -> ввод -> старт партии. Порядок обновления в кадре (Main.update) тоже:
+// эффекты -> камера -> ввод -> титульный экран (партия начинается с выбором сложности). Порядок обновления в кадре (Main.update) тоже:
 // мир едет, затем всё, что от него зависит.
 // ============================================================================
 
@@ -14,8 +14,10 @@ const Main = {
 
   boot() {
     Hud.init();
+    Results.init();
+    Chrome.init();
     if (typeof THREE === 'undefined') {
-      Hud.showError('Не удалось загрузить three.js с CDN. Проверь интернет и перезагрузи страницу.');
+      Hud.showError('Could not load three.js from the CDN. Check your internet connection and reload the page.');
       return;
     }
     Stage.init(document.getElementById('view'));
@@ -30,7 +32,9 @@ const Main = {
     Input.init();
     Board.init();
     BoardFx.init();
-    Game.reset();
+    Title.init();
+    Game.reset();                                      // сцена с машинами за титульным экраном; партия начнётся с выбором сложности
+    Title.show();
 
     Main.last = performance.now();
     requestAnimationFrame(Main.frame);
@@ -72,7 +76,7 @@ const Main = {
   // requestAnimationFrame, поэтому есть ручной прогон кадров step(n).
   debugApi() {
     return {
-      CONFIG, G: Game.state, tweens: Tween.list, act: Game.act, camera: Stage.camera, scene: Stage.scene, Board, BoardFx, Match3, Game,
+      CONFIG, G: Game.state, tweens: Tween.list, act: Game.act, camera: Stage.camera, scene: Stage.scene, Board, BoardFx, Match3, Game, AI, Title, Results, Chrome,
       oxAt: Bend.ox, psiAt: Bend.psi, forks: Forks.list, spawnFork: Forks.spawn,
       pause: v => { Main.paused = v; },
       setOdo: v => { Bend.odo = v; }, getOdo: () => Bend.odo,
