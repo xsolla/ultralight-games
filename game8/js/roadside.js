@@ -6,20 +6,31 @@
 // У скроллера логические координаты: lx поперёк дороги, z вдоль. На экран он попадает через Bend:
 // x = lx + Bend.ox(z), разворот по Bend.yaw(z). Объекты, которые попали на полотно развилки, прячутся
 // (Forks.hides). Числа и расстановка в CONFIG.ROADSIDE.
+//
+// Цвета ёлок, стволов и кустов, свечение ламп, пятна света под фонарями, подсветку щитов и "ветер" ставит
+// тема (Roadside.applyTheme, theme.js).
 // ============================================================================
 
 const Roadside = {
   list: [],          // { obj, lx, z, speedMul, yaw, onWrap, noHide }
   railMat: null,     // материал отбойника (развилки строят такой же)
+  mats: null,        // материалы, которые перекрашивает тема
 
   init() {
-    const R = CONFIG.ROADSIDE, W = CONFIG.WORLD, ROAD_W = CONFIG.TRACK.ROAD_W, SPAN = W.SPAN;
+    const R = CONFIG.ROADSIDE, W = CONFIG.WORLD, ROAD_W = CONFIG.TRACK.ROAD_W, SPAN = W.SPAN, FX = CONFIG.THEMES.FX;
     const { mat, box } = Util;
     const outsideX = () => (ROAD_W / 2 + R.SCATTER.NEAR + Math.random() * R.SCATTER.RANGE) * (Math.random() < 0.5 ? -1 : 1);
     const reroll = s => { s.lx = outsideX(); };
 
-    const treeMats = [mat(0x2f7a3c), mat(0x3b8f45), mat(0x27683a)], trunkMat = mat(0x6b4a2a);
-    const bushMat = mat(0x4f9a3c);
+    const treeMats = [mat(0xffffff), mat(0xffffff), mat(0xffffff)], trunkMat = mat(0xffffff);
+    const bushMat = mat(0xffffff);
+    const bulbMat = new THREE.MeshStandardMaterial({ color: 0xfff6d0, emissive: 0xfff0b0, emissiveIntensity: 0.8 });
+    const additive = (map, color, extra = {}) => ({ map, color, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, ...extra });
+    // пятно света под фонарём: лежит на дороге поверх асфальта (polygonOffset сильнее дороги и заплаток развилок)
+    const poolMat = new THREE.MeshBasicMaterial(additive(Util.glowTexture([[0, 0.9], [0.45, 0.4], [1, 0]]), FX.POOL.COLOR,
+      { polygonOffset: true, polygonOffsetFactor: -6, polygonOffsetUnits: -6 }));
+    const bulbGlowMat = new THREE.SpriteMaterial(additive(Util.glowTexture(), FX.BULB_GLOW.COLOR));
+    const signMats = [];
     const postMat = mat(0xeeeeee), postRed = mat(0xd23b3b);
     const railPostMat = mat(0x5a5f6a);
     const lampMat = mat(0x6d7480, { metalness: 0.5, roughness: 0.4 });
@@ -53,8 +64,12 @@ const Roadside = {
       const g = new THREE.Group();
       const pole = box(0.25, 8, 0.25, lampMat); pole.position.y = 4; g.add(pole);
       const arm = box(5, 0.2, 0.2, lampMat); arm.position.set(-side * 2.4, 7.9, 0); g.add(arm);
-      const bulb = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.3, 0.5), new THREE.MeshStandardMaterial({ color: 0xfff6d0, emissive: 0xfff0b0, emissiveIntensity: 0.8 }));
+      const bulb = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.3, 0.5), bulbMat);
       bulb.position.set(-side * 4.6, 7.75, 0); g.add(bulb);
+      const glow = new THREE.Sprite(bulbGlowMat);                                   // ореол лампы (ночью)
+      glow.position.set(-side * 4.6, 7.6, 0); glow.scale.setScalar(FX.BULB_GLOW.SIZE); g.add(glow);
+      const pool = new THREE.Mesh(new THREE.PlaneGeometry(FX.POOL.SIZE, FX.POOL.SIZE), poolMat);   // пятно света под лампой
+      pool.rotation.x = -Math.PI / 2; pool.position.set(-side * 4.6, FX.POOL.Y, 0); g.add(pool);
       return g;
     };
     const makeBillboard = (text, bg) => {
@@ -62,9 +77,12 @@ const Roadside = {
       g.fillStyle = bg; g.fillRect(0, 0, 512, 256);
       g.fillStyle = '#fff'; g.font = 'bold 72px system-ui, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
       g.fillText(text, 256, 128);
+      const tex = Util.canvasTexture(c);
+      const face = new THREE.MeshStandardMaterial({ map: tex, emissive: 0xffffff, emissiveMap: tex, emissiveIntensity: 0 });   // подсветка ночью
+      signMats.push(face);
       const grp = new THREE.Group();
       const panel = new THREE.Mesh(new THREE.BoxGeometry(7, 3.5, 0.2),
-        [mat(0x222), mat(0x222), mat(0x222), mat(0x222), new THREE.MeshStandardMaterial({ map: Util.canvasTexture(c) }), mat(0x222)]);
+        [mat(0x222), mat(0x222), mat(0x222), mat(0x222), face, mat(0x222)]);
       panel.position.y = 5.2; panel.castShadow = true; grp.add(panel);
       for (const s of [-1, 1]) { const p = box(0.3, 3.6, 0.3, lampMat); p.position.set(s * 2.6, 1.8, 0); grp.add(p); }
       return grp;
@@ -97,13 +115,26 @@ const Roadside = {
 
     // "ветер": полупрозрачные штрихи, летящие быстрее дороги
     const S = R.STREAKS;
-    const streakMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: S.OPACITY });
+    const streakMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0 });
+    Roadside.mats = { trees: treeMats, trunk: trunkMat, bush: bushMat, bulb: bulbMat, bulbGlow: bulbGlowMat, pool: poolMat, signs: signMats, streak: streakMat };
     for (let i = 0; i < S.COUNT; i++) {
       const m = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.05, S.LENGTH), streakMat);
       m.position.y = S.Y + Math.random() * S.Y_RANGE;
       Roadside.add(m, -SPAN + Math.random() * SPAN, (Math.random() < 0.5 ? -1 : 1) * (ROAD_W / 2 + S.LATERAL + Math.random() * S.LATERAL_RANGE),
         { speedMul: S.SPEED_MUL, noHide: true, onWrap: s => { s.obj.position.y = S.Y + Math.random() * S.Y_RANGE; } });
     }
+  },
+
+  // Вид обочины по теме th (CONFIG.THEMES, уже слитой с day): цвета, лампы, пятна света, подсветка щитов, "ветер"
+  applyTheme(th) {
+    const M = Roadside.mats;
+    M.trees.forEach((m, i) => m.color.setHex(th.TREES[i % th.TREES.length]));
+    M.trunk.color.setHex(th.TRUNK); M.bush.color.setHex(th.BUSH);
+    M.bulb.emissiveIntensity = th.BULB;
+    M.bulbGlow.opacity = th.BULB_GLOW; M.bulbGlow.visible = th.BULB_GLOW > 0;
+    M.pool.opacity = th.POOLS; M.pool.visible = th.POOLS > 0;
+    for (const s of M.signs) s.emissiveIntensity = th.SIGNS;
+    M.streak.opacity = th.STREAKS;
   },
 
   add(obj, z, lx, { speedMul = 1, yaw = false, onWrap = null, noHide = false } = {}) {

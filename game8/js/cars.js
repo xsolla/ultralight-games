@@ -14,8 +14,20 @@
 
 const Cars = {
   glassMat: null, tireMat: null, rimMat: null, headMat: null, darkMat: null, glowTex: null,
+  beamMat: null, headGlowMat: null,   // свет фар (полоса на дороге и ореол), общие для всех машин; яркость задаёт тема
 
   init() {
+    const FX = CONFIG.THEMES.FX;
+    // полоса света фар: трапеция, расширяется вперёд и гаснет к дальнему концу (u = 0 у машины)
+    const [bc, bg] = Util.canvas(256, 128), grad = bg.createLinearGradient(0, 0, 256, 0);
+    grad.addColorStop(0, 'rgba(255,255,255,0.95)'); grad.addColorStop(0.45, 'rgba(255,255,255,0.45)'); grad.addColorStop(1, 'rgba(255,255,255,0)');
+    bg.filter = 'blur(7px)'; bg.fillStyle = grad;
+    bg.beginPath(); bg.moveTo(8, 40); bg.lineTo(248, 8); bg.lineTo(248, 120); bg.lineTo(8, 88); bg.closePath(); bg.fill();
+    const additive = { transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false };
+    Cars.beamMat = new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(bc), color: FX.BEAM.COLOR, ...additive,
+      polygonOffset: true, polygonOffsetFactor: -6, polygonOffsetUnits: -6 });   // поверх дороги и заплаток развилок
+    Cars.headGlowMat = new THREE.SpriteMaterial({ map: Util.glowTexture(), color: FX.HEAD_GLOW.COLOR, ...additive });
+
     Cars.glassMat = new THREE.MeshStandardMaterial({ color: 0x18222e, roughness: 0.25, metalness: 0.6, flatShading: true });
     Cars.tireMat = Util.mat(0x1d1f24, { roughness: 0.9 });
     Cars.rimMat = Util.mat(0xd5d8dd, { metalness: 0.5, roughness: 0.4 });
@@ -132,6 +144,13 @@ const Cars = {
     lamp(L.stop, 0.08, 0.1, Math.min(0.7, T.w * 0.35), xR + 0.1, T.curve[0][1] + 0.12, 0);   // центральный стоп-сигнал
     glow(L.glowRed, xR - 0.1, T.curve[0][1] + 0.12, 0, 0.9);
 
+    // свет фар (виден, когда тема включает фары): ореолы у фар и полоса света на дороге впереди
+    const FX = CONFIG.THEMES.FX;
+    for (const s of [-1, 1]) glow(Cars.headGlowMat, xF + 0.25, yF, s * T.w * 0.3, FX.HEAD_GLOW.SIZE);
+    const beamGeo = new THREE.PlaneGeometry(FX.BEAM.LEN, T.w * FX.BEAM.WIDTH);
+    beamGeo.rotateX(-Math.PI / 2); beamGeo.translate(xF + FX.BEAM.LEN / 2 - 0.2, FX.BEAM.Y, 0);
+    g.add(new THREE.Mesh(beamGeo, Cars.beamMat));
+
     // бамперы и спойлер
     const bf = Util.box(0.3, 0.22, T.w * 0.92, Cars.darkMat); bf.position.set(xF - 0.02, T.y0 + 0.08, 0); g.add(bf);
     const br = Util.box(0.3, 0.22, T.w * 0.92, Cars.darkMat); br.position.set(xR + 0.02, T.y0 + 0.08, 0); g.add(br);
@@ -143,6 +162,12 @@ const Cars = {
     g.rotation.y = Math.PI / 2;      // локальный +x (перёд) -> мировой -z (вперёд)
     const holder = new THREE.Group(); holder.add(g);
     return { holder, body: g, hull: body, bodyMat, wheels, lamps: L, r: T.r, height: T.curve.reduce((m, p) => Math.max(m, p[1]), 0) };
+  },
+
+  // Фары по теме: 0 выключены (днём), иначе яркость полосы света и ореолов
+  applyTheme(th) {
+    Cars.beamMat.opacity = Cars.headGlowMat.opacity = th.HEADLIGHTS;
+    Cars.beamMat.visible = Cars.headGlowMat.visible = th.HEADLIGHTS > 0;
   },
 
   // Покадровое оживление машины. busy: идёт ли ход (тогда покачивание корпуса не мешает анимациям).

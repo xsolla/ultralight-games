@@ -22,16 +22,14 @@ const CONFIG = {
     ROAD_W: 0,            // считается ниже: LANES * LANE_W
   },
 
-  // ---- Мир: скорость, земля, небо, туман -------------------------------------
+  // ---- Мир: скорость, земля, горы (цвета неба, тумана, земли и гор в THEMES) -------
   WORLD: {
     SPEED: 38,            // скорость, с которой мир едет на игрока
     SPAN: 200,            // длина зацикленного участка обочины
     Z_NEAR: 26,           // за этой z (позади камеры) объекты обочины перескакивают вперёд
-    SKY: 0x9cc4ea,
-    FOG: { NEAR: 70, FAR: 175 },
-    GROUND: { SIZE: 600, Y: -0.02, Z: -80, COLOR: 0x4f8a3f },
+    GROUND: { SIZE: 600, Y: -0.02, Z: -80 },
     MOUNTAINS: {          // дальние горы на горизонте
-      COUNT: 9, COLOR: 0x6f86a8, SEGMENTS: 5,
+      COUNT: 9, SEGMENTS: 5,
       H_MIN: 18, H_RANGE: 22, R_MIN: 22, R_RANGE: 20,
       X0: -120, DX: 30, JITTER: 20, Z: -175, Z_RANGE: 30,
     },
@@ -39,12 +37,9 @@ const CONFIG = {
 
   // ---- Рендер и свет ----------------------------------------------------------
   RENDER: { MAX_DPR: 2 },
+  // Тени солнца. Цвета и яркость света, положение солнца в THEMES.
   LIGHT: {
-    HEMI: { SKY: 0xcfe4ff, GROUND: 0x5a5236, INTENSITY: 1.1 },
-    SUN: {
-      COLOR: 0xfff2dc, INTENSITY: 2.4, POS: [-18, 30, -6],
-      SHADOW_MAP: 2048, SHADOW_BOX: { left: -30, right: 30, top: 25, bottom: -70, near: 1, far: 90 }, SHADOW_BIAS: -0.0005,
-    },
+    SUN: { SHADOW_MAP: 2048, SHADOW_BOX: { left: -30, right: 30, top: 25, bottom: -70, near: 1, far: 90 }, SHADOW_BIAS: -0.0005 },
   },
 
   // ---- Камера -----------------------------------------------------------------
@@ -293,10 +288,10 @@ const CONFIG = {
   // ---- Дорога -----------------------------------------------------------------
   ROAD: {
     LENGTH: 240, SEGMENTS: 120, Z_START: 30,   // лента от Z_START на LENGTH вперёд
-    ROUGHNESS: 0.95,
+    // Разметка. Цвет асфальта, шум, блеск, снег и лужи задаёт тема (THEMES.*.ROAD).
     TEXTURE: {
-      WIDTH: 256, NOISE_COUNT: 2600, NOISE_BASE: 50, NOISE_RANGE: 30,
-      ASPHALT: '#3b3e46', DASH: '#d8dce2', DASH_FROM: 0.28, DASH_LEN: 0.44,
+      WIDTH: 256, NOISE_COUNT: 2600,
+      DASH: '#d8dce2', DASH_FROM: 0.28, DASH_LEN: 0.44,
       EDGE_LINE: '#e8e2a0', EDGE_OFFSET: 0.45, RUMBLE_W: 0.3, RUMBLE_RED: '#d23b3b', RUMBLE_WHITE: '#e0e0e0',
     },
   },
@@ -329,7 +324,92 @@ const CONFIG = {
       SPACING: 50, Z0: -35, OFFSET: 6,
       LIST: [['MATCH 3', '#c0392b'], ['RACING', '#2471a3'], ['GO GO GO!', '#7d3c98'], ['TURBO!', '#d68910']],
     },
-    STREAKS: { COUNT: 26, SPEED_MUL: 1.7, OPACITY: 0.22, LENGTH: 3.5, LATERAL: 0.5, LATERAL_RANGE: 6, Y: 0.5, Y_RANGE: 5 },
+    STREAKS: { COUNT: 26, SPEED_MUL: 1.7, LENGTH: 3.5, LATERAL: 0.5, LATERAL_RANGE: 6, Y: 0.5, Y_RANGE: 5 },   // яркость "ветра" в THEMES.*.STREAKS
+  },
+
+  // ---- Темы дороги (theme.js, weather.js) --------------------------------------
+  // В начале каждой партии тема выбирается случайно из ORDER (Theme.next; скрытая функция: кристалл на
+  // титульном экране задаёт тему следующей партии, UI.TITLE.GEM_THEME). Тема описывает всё, что меняет вид:
+  //   SKY цвет неба или SKY_GRAD вертикальный градиент [[доля высоты экрана, цвет], ...]; FOG цвет и дальность тумана;
+  //   HEMI небо, земля и яркость рассеянного света; SUN цвет, яркость, положение солнца, SHADOWS тени;
+  //   GROUND, MOUNTAINS, TREES (ярусы ёлок), TRUNK, BUSH цвета; ROAD асфальт: цвет, шум, шероховатость, металличность,
+  //   SNOW снежинок у краёв, PUDDLES луж на плитку; COVER цвет заплатки на развилках (как асфальт);
+  //   POOLS яркость пятен света под фонарями, BULB свечение ламп, BULB_GLOW ореол ламп, HEADLIGHTS фары машин
+  //   (ореол и полоса света на дороге), SIGNS подсветка щитов, STREAKS "ветер", STARS звёзд на небе,
+  //   SUN_DISC солнце на горизонте впереди, WEATHER осадки (weather.js).
+  // Тема, кроме day, задаёт только то, что отличается: остальное берётся из day (Theme.get).
+  THEMES: {
+    ORDER: ['day', 'night', 'winter', 'rain', 'sunrise'],
+    day: {
+      SKY: 0x9cc4ea, SKY_GRAD: null, FOG: { COLOR: 0x9cc4ea, NEAR: 70, FAR: 175 },
+      HEMI: { SKY: 0xcfe4ff, GROUND: 0x5a5236, INTENSITY: 1.1 },
+      SUN: { COLOR: 0xfff2dc, INTENSITY: 2.4, POS: [-18, 30, -6], SHADOWS: true },
+      GROUND: 0x4f8a3f, MOUNTAINS: 0x6f86a8,
+      TREES: [0x2f7a3c, 0x3b8f45, 0x27683a], TRUNK: 0x6b4a2a, BUSH: 0x4f9a3c,
+      ROAD: { ASPHALT: '#3b3e46', NOISE_BASE: 50, NOISE_RANGE: 30, ROUGHNESS: 0.95, METALNESS: 0, SNOW: 0, PUDDLES: 0 },
+      COVER: 0x3d4048,
+      POOLS: 0, BULB: 0.8, BULB_GLOW: 0, HEADLIGHTS: 0, SIGNS: 0, STREAKS: 0.22, STARS: 0,
+      SUN_DISC: null, WEATHER: null,
+    },
+    // Ночь: та же летняя дорога в темноте, пятна света под фонарями, фары, звёзды
+    night: {
+      SKY: 0x081022, FOG: { COLOR: 0x081022, NEAR: 45, FAR: 165 },
+      HEMI: { SKY: 0x4a5c90, GROUND: 0x0c0e14, INTENSITY: 0.45 },
+      SUN: { COLOR: 0x9fb4ff, INTENSITY: 0.5, POS: [-18, 30, -6], SHADOWS: false },
+      GROUND: 0x1c3322, MOUNTAINS: 0x141c34,
+      TREES: [0x173d22, 0x1d4a2a, 0x143520], TRUNK: 0x3a2a1a, BUSH: 0x21462a,
+      ROAD: { ASPHALT: '#2b2e35', NOISE_BASE: 38, NOISE_RANGE: 22 },
+      COVER: 0x2c2f36,
+      POOLS: 0.9, BULB: 2.4, BULB_GLOW: 0.95, HEADLIGHTS: 0.8, SIGNS: 0.65, STREAKS: 0.07, STARS: 260,
+    },
+    // Зима: белая земля, ёлки в снегу, снегопад
+    winter: {
+      SKY: 0xc6d4e4, FOG: { COLOR: 0xc6d4e4, NEAR: 45, FAR: 150 },
+      HEMI: { SKY: 0xeef4ff, GROUND: 0x9aa8b8, INTENSITY: 1.25 },
+      SUN: { COLOR: 0xf2f6ff, INTENSITY: 1.6, POS: [-18, 30, -6], SHADOWS: true },
+      GROUND: 0xe8eef4, MOUNTAINS: 0xa6b6ca,
+      TREES: [0xe9f0f5, 0x2c5844, 0xd2dfe8], TRUNK: 0x5a4530, BUSH: 0xdde7ee,
+      ROAD: { ASPHALT: '#464b54', NOISE_BASE: 62, NOISE_RANGE: 30, ROUGHNESS: 0.85, SNOW: 650 },
+      COVER: 0x484d56,
+      STREAKS: 0.1,
+      WEATHER: { TYPE: 'snow', COUNT: 1400, SIZE: 0.45, COLOR: 0xffffff, OPACITY: 0.95, FALL: 2.2, FALL_RANGE: 1.6, SWAY: 0.9, DRIFT: 0.35 },
+    },
+    // Дождь: вечер, мокрый блестящий асфальт с лужами, фары и фонари горят, дождь
+    rain: {
+      SKY: 0x4c5664, FOG: { COLOR: 0x4c5664, NEAR: 35, FAR: 140 },
+      HEMI: { SKY: 0x9aa6b8, GROUND: 0x24282e, INTENSITY: 0.65 },
+      SUN: { COLOR: 0xb0bcd0, INTENSITY: 0.55, POS: [-4, 14, -60], SHADOWS: false },   // низко впереди: блики на мокрой дороге
+      GROUND: 0x2f4a2c, MOUNTAINS: 0x404b5a,
+      TREES: [0x204a2c, 0x285634, 0x1c4026], TRUNK: 0x40301e, BUSH: 0x30582e,
+      ROAD: { ASPHALT: '#2a2d33', NOISE_BASE: 36, NOISE_RANGE: 22, ROUGHNESS: 0.42, METALNESS: 0.25, PUDDLES: 5 },
+      COVER: 0x2b2e34,
+      POOLS: 0.5, BULB: 2, BULB_GLOW: 0.7, HEADLIGHTS: 0.65, SIGNS: 0.4, STREAKS: 0.1,
+      WEATHER: { TYPE: 'rain', COUNT: 1000, LENGTH: 0.05, COLOR: 0xb4c4d8, OPACITY: 0.55, FALL: 34, FALL_RANGE: 10, SLANT: 3, DRIFT: 0.45 },
+    },
+    // Рассвет: золотое небо, солнце впереди над горизонтом, тёплый низкий свет
+    sunrise: {
+      SKY: 0xffc777,
+      // неба видно только верхние ~9% экрана (камера смотрит вниз), поэтому весь градиент в этой полосе
+      SKY_GRAD: [[0, '#5e4f96'], [0.035, '#c46a7e'], [0.065, '#f39257'], [0.095, '#ffbf68'], [0.2, '#ffd78e'], [1, '#ffe0a0']],
+      FOG: { COLOR: 0xf7c27a, NEAR: 60, FAR: 175 },
+      HEMI: { SKY: 0xffd4a0, GROUND: 0x5a4030, INTENSITY: 0.9 },
+      SUN: { COLOR: 0xffb46e, INTENSITY: 2.6, POS: [-10, 16, -30], SHADOWS: true },
+      GROUND: 0x6e8a3a, MOUNTAINS: 0x8f5f7e,
+      TREES: [0x3f6c30, 0x4e7c34, 0x365e2c], TRUNK: 0x6b4a2a, BUSH: 0x628c3a,
+      ROAD: { ASPHALT: '#46413f', NOISE_BASE: 58, NOISE_RANGE: 30 },
+      COVER: 0x48433f,
+      STREAKS: 0.2,
+      SUN_DISC: { COLOR: 0xfff3c8, SIZE: 36, Y: 9, Z: -168 },    // низко над горизонтом, перед дальними горами (иначе они его закрывают)
+    },
+    // Общее для всех тем: пятно света под фонарём (сторона, высота, цвет), полоса света фар (длина, ширина
+    // в долях ширины машины), ореолы, звёзды (расстояние, высота), коробка осадков вокруг камеры
+    FX: {
+      POOL: { SIZE: 11, Y: 0.05, COLOR: 0xffd890 },
+      BEAM: { LEN: 11, WIDTH: 1.9, Y: 0.05, COLOR: 0xfff0c4 },
+      HEAD_GLOW: { SIZE: 1.5, COLOR: 0xfff4d0 }, BULB_GLOW: { SIZE: 3.2, COLOR: 0xffe0a0 },
+      STARS: { DIST: 340, Y_MIN: 30, Y_MAX: 170, SIZE: 1.6 },
+      WEATHER_BOX: { X: 32, Y: 30, Z_FAR: -95, Z_NEAR: 22 },
+    },
   },
 
   // ---- Фейковые развилки ------------------------------------------------------
@@ -343,7 +423,7 @@ const CONFIG = {
     K: 0.014, T1: 40,                    // кривизна расхождения и длина первого участка дуги
     K2: 0.008, S_MAX: 1.0,               // дальше ветка продолжает загибаться, пока наклон не дойдёт до S_MAX
     MESH_STEP: 3,                        // шаг сетки полотна ответвления
-    COVER: { STEP: 2, Y: 0.004, EDGE: 0.66, COLOR: 0x3d4048 },   // заплатка поверх кромки и жёлтой линии основной дороги
+    COVER: { STEP: 2, Y: 0.004, EDGE: 0.66 },   // заплатка поверх кромки и жёлтой линии основной дороги (цвет в THEMES.*.COVER)
     BOARD_ROWS: [[50, [-3.5, 0, 3.5]], [56, [-1.75, 1.75]]],     // [расстояние от развилки, [смещения щитов поперёк]]
     // Щиты на ветке: логотип Xsolla (как на титульном экране, Chrome.drawLogo) на тёмном фоне в рамке.
     // LOGO_W ширина логотипа на текстуре 512 x 288
@@ -373,7 +453,9 @@ const CONFIG = {
     FPS_WINDOW: 0.5,
     // Титульный экран (title.js): кристаллы над названием (индексы MATCH3.TILES) и их радиус в px;
     // как часто кнопка сложности проверяет, доигран ли брошенный ход
-    TITLE: { GEMS: [1, 0, 4, 2, 5], GEM_R: 13, WAIT: 0.05 },
+    TITLE: { GEMS: [1, 0, 4, 2, 5], GEM_R: 13, WAIT: 0.05,
+      // скрытая функция: нажатие на кристалл над названием задаёт тему дороги следующей партии (по id кристалла)
+      GEM_THEME: { green: 'day', teal: 'winter', yellow: 'sunrise', red: 'rain', purple: 'night' } },
     // Окно "How to play" (help.js): радиус значков в списке цветов; картинка ходов (px): сторона (наибольшая и
     // наименьшая, она уменьшается, чтобы страница влезла без прокрутки), радиусы кристаллов (одиночный и в паре),
     // машина, на сколько стрелка не доходит до центра клетки (одиночный, пара)

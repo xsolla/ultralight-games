@@ -21,6 +21,12 @@ const Title = {
       if (!CONFIG.MATCH3.TILES[type]) continue;
       const g = Crystals.sprite(type, CONFIG.UI.TITLE.GEM_R, dpr);
       g.canvas.style.width = g.canvas.style.height = g.size + 'px';
+      // скрытая функция (нигде не описана для игрока): кристалл задаёт тему дороги следующей партии, он коротко вспыхивает
+      const theme = CONFIG.UI.TITLE.GEM_THEME[CONFIG.MATCH3.TILES[type].id];
+      if (theme) g.canvas.addEventListener('click', () => {
+        Theme.force(theme);
+        g.canvas.classList.remove('picked'); void g.canvas.offsetWidth; g.canvas.classList.add('picked');
+      });
       gems.appendChild(g.canvas);
     }
 

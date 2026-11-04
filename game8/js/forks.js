@@ -89,9 +89,9 @@ const Forks = (() => {
     init() {
       // ответвление едет вместе с миром, поэтому его текстура неподвижна (клон текстуры дороги)
       const armTex = Road.tex.clone(); armTex.needsUpdate = true; armTex.repeat.set(1, 1);
-      armMat = new THREE.MeshStandardMaterial({ map: armTex, roughness: CONFIG.ROAD.ROUGHNESS, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 });
-      // заплатка цвета асфальта поверх красно-белой кромки и жёлтой линии основной дороги
-      coverMat = new THREE.MeshStandardMaterial({ color: F.COVER.COLOR, roughness: CONFIG.ROAD.ROUGHNESS, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4 });
+      armMat = new THREE.MeshStandardMaterial({ map: armTex, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 });
+      // заплатка цвета асфальта поверх красно-белой кромки и жёлтой линии основной дороги (цвет из темы)
+      coverMat = new THREE.MeshStandardMaterial({ color: 0xffffff, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4 });
       // щит с логотипом Xsolla: тёмный фон, светлая рамка, логотип по центру (одна текстура на все щиты)
       const B = F.BOARD, [c, g] = Util.canvas(512, 288), bgGrad = g.createLinearGradient(0, 0, 0, 288);
       bgGrad.addColorStop(0, B.BG2); bgGrad.addColorStop(1, B.BG);
@@ -99,8 +99,17 @@ const Forks = (() => {
       g.strokeStyle = B.FRAME; g.lineWidth = 10; g.strokeRect(14, 14, 484, 260);
       Chrome.drawLogo(g, (512 - B.LOGO_W) / 2, (288 - Chrome.logoHeight(B.LOGO_W)) / 2, B.LOGO_W);
       const t = Util.canvasTexture(c); t.anisotropy = 4;
-      boardMats = [new THREE.MeshStandardMaterial({ map: t, roughness: 0.8 })];
+      boardMats = [new THREE.MeshStandardMaterial({ map: t, roughness: 0.8, emissive: 0xffffff, emissiveMap: t, emissiveIntensity: 0 })];   // подсветка ночью
       boardDark = Util.mat(0x23262c);
+    },
+
+    // Вид веток по теме th: асфальт как у основной дороги (её canvas уже перерисован), заплатка, подсветка щитов
+    applyTheme(th) {
+      armMat.map.needsUpdate = true;
+      armMat.roughness = coverMat.roughness = th.ROAD.ROUGHNESS;
+      armMat.metalness = coverMat.metalness = th.ROAD.METALNESS;
+      coverMat.color.setHex(th.COVER);
+      for (const m of boardMats) m.emissiveIntensity = th.SIGNS;
     },
 
     spawn(u) {

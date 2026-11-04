@@ -52,6 +52,7 @@ const Game = {
 
   reset() {
     const S = Game.state, P = CONFIG.PLAYER, E = CONFIG.ENEMIES;
+    Theme.apply(Theme.next());                       // своя тема дороги на каждую партию (случайная или заданная заранее)
     for (const c of S.cars) Stage.scene.remove(c.node);
     S.cars.length = 0; S.playerRow = P.START_ROW; S.turn = 1; S.log = ''; S.reveal = false; S.over = null;
     Game.queue.length = 0;

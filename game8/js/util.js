@@ -44,6 +44,14 @@ const Util = {
     return [c, c.getContext('2d')];
   },
 
+  // Мягкое белое пятно: яркий центр, к краю прозрачно (ореолы, пятна света). stops: [[доля радиуса, непрозрачность], ...]
+  glowTexture(stops = [[0, 1], [0.35, 0.45], [1, 0]], size = 128) {
+    const [c, g] = Util.canvas(size, size), h = size / 2, r = g.createRadialGradient(h, h, 0, h, h, h);
+    for (const [at, a] of stops) r.addColorStop(at, `rgba(255,255,255,${a})`);
+    g.fillStyle = r; g.fillRect(0, 0, size, size);
+    return new THREE.CanvasTexture(c);
+  },
+
   // Текстура из canvas в sRGB
   canvasTexture(canvas) {
     const t = new THREE.CanvasTexture(canvas);

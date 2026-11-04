@@ -29,6 +29,8 @@ const Main = {
     Markers.init();
     Fx.init();
     Rig.init();
+    Weather.init();
+    Theme.init();                                      // тему ставит Game.reset (своя на каждую партию)
     // Input.init();                                  // клавиатура отключена: управление только кристаллами (вернуть: раскомментировать)
     Board.init();
     BoardFx.init();
@@ -69,7 +71,9 @@ const Main = {
     Roadside.update(dt);                               // обочина
     Game.update(dt, t);                                // машины
     Fx.update(dt);                                     // искры, тряска, толчок угла обзора
+    Weather.update(dt);                                // снег или дождь
     Rig.update(dt, t, Game.targetX());                 // камера
+    Theme.update();                                    // звёзды и солнце впереди камеры
     BoardFx.update(dt);                                // кометы и искры поля match-3
   },
 
@@ -77,7 +81,7 @@ const Main = {
   // requestAnimationFrame, поэтому есть ручной прогон кадров step(n).
   debugApi() {
     return {
-      CONFIG, G: Game.state, tweens: Tween.list, act: Game.act, camera: Stage.camera, scene: Stage.scene, Board, BoardFx, Match3, Game, AI, Title, Results, Chrome, Help,
+      CONFIG, G: Game.state, tweens: Tween.list, act: Game.act, camera: Stage.camera, scene: Stage.scene, Board, BoardFx, Match3, Game, AI, Title, Results, Chrome, Help, Theme, Weather,
       oxAt: Bend.ox, psiAt: Bend.psi, forks: Forks.list, spawnFork: Forks.spawn,
       pause: v => { Main.paused = v; },
       setOdo: v => { Bend.odo = v; }, getOdo: () => Bend.odo,

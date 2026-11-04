@@ -166,6 +166,9 @@ body { display: flex; align-items: center; justify-content: center; }
 #title-gems canvas:nth-child(2) { animation-delay: -.5s; } #title-gems canvas:nth-child(3) { animation-delay: -1s; }
 #title-gems canvas:nth-child(4) { animation-delay: -1.5s; } #title-gems canvas:nth-child(5) { animation-delay: -2s; }
 @keyframes gem-bob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-5px); } }
+/* скрытая функция: нажатый кристалл (тема следующей партии, title.js) коротко вспыхивает */
+#title-gems canvas.picked { animation: gem-pick .45s ease-out, gem-bob 2.4s ease-in-out infinite; }
+@keyframes gem-pick { from { filter: brightness(2.4) drop-shadow(0 0 8px #fff); transform: scale(1.35); } to { filter: none; transform: none; } }
 
 .title-name { margin: 0; display: flex; flex-direction: column; align-items: center; font-weight: 900; line-height: .95; text-transform: uppercase; }
 .t-puzzle, .t-racing { font-size: clamp(34px, 14cqw, 72px); letter-spacing: .03em; }
