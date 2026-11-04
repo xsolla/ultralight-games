@@ -1,5 +1,6 @@
 // ============================================================================
-// chrome.js — общие для игр портала элементы: логотип Xsolla (только титульный экран) и колонка кнопок
+// chrome.js — общие для игр портала элементы: логотип Xsolla (титульный экран, а на canvas, drawLogo, щиты на
+// ветках развилок) и колонка кнопок
 // справа сверху: звук, выход, полный экран. Значения скопированы из ../branding.md и ../buttons.md
 // (это не импорт: игры деплоятся отдельно, копия держится одинаковой по этим файлам).
 //
@@ -49,8 +50,26 @@ const Chrome = {
   SOUND_NEXT: { on: 'musicoff', musicoff: 'off', off: 'on' },
   SOUND_LABEL: { on: 'Sound: music and effects', musicoff: 'Sound: effects only', off: 'Sound off' },
 
+  LOGO_W: 169.997,   // ширина рисунка в единицах исходника
+  LOGO_Y0: 4.53857,  // верхний край рисунка в единицах исходника
+  logoCache: null,   // Path2D логотипа, строятся один раз
+
   sound: 'on',
-  btn: {},           // sound, exit, fullscreen
+  btn: {},           // sound, exit, fullscreen, help
+
+  // Логотип на canvas (../branding.md, "Canvas implementation"): (x, y) левый верх видимого рисунка, w ширина.
+  // Нужен щитам на ветках развилок (forks.js).
+  drawLogo(g, x, y, w) {
+    if (!Chrome.logoCache) Chrome.logoCache = Chrome.LOGO_PATHS.map(d => new Path2D(d));
+    const s = w / Chrome.LOGO_W;
+    g.save();
+    g.translate(x, y - Chrome.LOGO_Y0 * s);
+    g.scale(s, s);
+    g.fillStyle = Chrome.LOGO_FILL;
+    for (const p of Chrome.logoCache) g.fill(p, 'evenodd');
+    g.restore();
+  },
+  logoHeight: w => w * 36.9211 / Chrome.LOGO_W,    // высота видимого рисунка при ширине w
 
   init() {
     try { const s = localStorage.getItem(CONFIG.SOUND_KEY); if (Chrome.SOUND_NEXT[s]) Chrome.sound = s; } catch (e) { /* без хранилища: по умолчанию */ }

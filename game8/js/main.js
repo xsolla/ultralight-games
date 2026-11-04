@@ -29,7 +29,7 @@ const Main = {
     Markers.init();
     Fx.init();
     Rig.init();
-    Input.init();
+    // Input.init();                                  // клавиатура отключена: управление только кристаллами (вернуть: раскомментировать)
     Board.init();
     BoardFx.init();
     Title.init();

@@ -92,15 +92,14 @@ const Forks = (() => {
       armMat = new THREE.MeshStandardMaterial({ map: armTex, roughness: CONFIG.ROAD.ROUGHNESS, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 });
       // заплатка цвета асфальта поверх красно-белой кромки и жёлтой линии основной дороги
       coverMat = new THREE.MeshStandardMaterial({ color: F.COVER.COLOR, roughness: CONFIG.ROAD.ROUGHNESS, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4 });
-      boardMats = F.BOARD_COLORS.map(bg => {
-        const [c, g] = Util.canvas(512, 288);
-        g.fillStyle = bg; g.fillRect(0, 0, 512, 288);
-        g.strokeStyle = 'rgba(255,255,255,0.85)'; g.lineWidth = 10; g.strokeRect(14, 14, 484, 260);
-        g.fillStyle = '#fff'; g.font = 'bold 130px system-ui, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
-        g.fillText(F.BOARD_TEXT, 256, 150);
-        const t = Util.canvasTexture(c); t.anisotropy = 4;
-        return new THREE.MeshStandardMaterial({ map: t, roughness: 0.8 });
-      });
+      // щит с логотипом Xsolla: тёмный фон, светлая рамка, логотип по центру (одна текстура на все щиты)
+      const B = F.BOARD, [c, g] = Util.canvas(512, 288), bgGrad = g.createLinearGradient(0, 0, 0, 288);
+      bgGrad.addColorStop(0, B.BG2); bgGrad.addColorStop(1, B.BG);
+      g.fillStyle = bgGrad; g.fillRect(0, 0, 512, 288);
+      g.strokeStyle = B.FRAME; g.lineWidth = 10; g.strokeRect(14, 14, 484, 260);
+      Chrome.drawLogo(g, (512 - B.LOGO_W) / 2, (288 - Chrome.logoHeight(B.LOGO_W)) / 2, B.LOGO_W);
+      const t = Util.canvasTexture(c); t.anisotropy = 4;
+      boardMats = [new THREE.MeshStandardMaterial({ map: t, roughness: 0.8 })];
       boardDark = Util.mat(0x23262c);
     },
 
