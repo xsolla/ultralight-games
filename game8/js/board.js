@@ -56,7 +56,7 @@ const Board = {
     else Board.snap();
   },
 
-  // Поставить все кружки ровно в центры клеток
+  // Поставить все кристаллы ровно в центры клеток
   snap() {
     for (const row of Board.tiles) for (const t of row) if (t) { t.x = Board.cellX(t.c); t.y = Board.cellY(t.r); t.s = 1; t.a = 1; }
   },
@@ -77,7 +77,7 @@ const Board = {
     Board.selected = null;
   },
 
-  // Новая партия: другое поле, кружки "вырастают"
+  // Новая партия: другое поле, кристаллы "вырастают"
   async reset() {
     Board.selected = null;
     Hud.tallyHide();
@@ -101,7 +101,7 @@ const Board = {
     Board.click(Math.floor((e.clientY - rect.top) / Board.ch), Math.floor((e.clientX - rect.left) / Board.cw));
   },
 
-  // Клик по клетке (ряд, колонка). Выделяет кружок, а второй клик по соседнему делает свап.
+  // Клик по клетке (ряд, колонка). Выделяет кристалл, а второй клик по соседнему делает свап.
   click(r, c) {
     if (Board.locked() || !Match3.inside(Board.tiles, r, c)) return;
     const t = Board.tiles[r][c], sel = Board.selected;
@@ -109,7 +109,7 @@ const Board = {
     if (!sel) { Board.selected = t; return; }
     if (sel === t) { Board.selected = null; return; }
     if (Math.abs(sel.r - t.r) + Math.abs(sel.c - t.c) === 1) { Board.selected = null; Board.trySwap(sel, t); return; }
-    Board.selected = t;                                   // не сосед: выделение переходит на новый кружок
+    Board.selected = t;                                   // не сосед: выделение переходит на новый кристалл
   },
 
   // ---- ход ----
@@ -119,7 +119,7 @@ const Board = {
     let cells = Match3.find(Board.tiles);
     if (!cells.length) { await Board.swapAnim(a, b); Board.animating = false; return; }   // линии нет, откат
 
-    // вся цепочка схлопываний (с каскадами) считается по цветам и даёт одну команду
+    // вся цепочка схлопываний (с каскадами) считается по цветам и даёт один ход (одну или две команды)
     const counts = Array(CONFIG.MATCH3.TILES.length).fill(0), flights = [], spot = [0, 0, 0];
     while (cells.length) {
       Board.count(cells, counts, flights, spot);
@@ -134,7 +134,7 @@ const Board = {
     Board.animating = false;
   },
 
-  // Прибавить схлопывающиеся кружки к счёту по цветам. Как только цветов стало больше одного,
+  // Прибавить схлопывающиеся кристаллы к счёту по цветам. Как только цветов стало больше одного,
   // HP в разделителе заменяется счётчиком: то, что схлопнулось раньше, он показывает сразу, а из кристаллов
   // этого шага в него летят кометы (BoardFx.comet), каждая прибавляет 1. Их Promise копятся в flights.
   // В spot копятся [сумма x, сумма y, число] схлопнутых кристаллов: оттуда взлетает цвет, если он один.
@@ -184,7 +184,7 @@ const Board = {
     for (const [r, c] of cells) Board.tiles[r][c] = null;
   },
 
-  // Кружки над пустотами падают вниз, сверху по тем же колонкам падают новые
+  // Кристаллы над пустотами падают вниз, сверху по тем же колонкам падают новые
   refill() {
     const falls = [];
     for (let c = 0; c < Board.cols; c++) {
@@ -208,7 +208,7 @@ const Board = {
     }));
   },
 
-  // Нет ходов: кружки исчезают и поле собирается заново
+  // Нет ходов: кристаллы исчезают и поле собирается заново
   async reshuffle() {
     const all = Board.tiles.flat(), types = Match3.generate(Board.rows, Board.cols);
     await Tween.run(CONFIG.MATCH3.SHUFFLE / 2, k => { for (const t of all) { t.s = 1 - k; t.a = 1 - k; } });
