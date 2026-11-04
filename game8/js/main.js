@@ -33,6 +33,7 @@ const Main = {
     Board.init();
     BoardFx.init();
     Title.init();
+    Help.init();
     Game.reset();                                      // сцена с машинами за титульным экраном; партия начнётся с выбором сложности
     Title.show();
 
@@ -76,7 +77,7 @@ const Main = {
   // requestAnimationFrame, поэтому есть ручной прогон кадров step(n).
   debugApi() {
     return {
-      CONFIG, G: Game.state, tweens: Tween.list, act: Game.act, camera: Stage.camera, scene: Stage.scene, Board, BoardFx, Match3, Game, AI, Title, Results, Chrome,
+      CONFIG, G: Game.state, tweens: Tween.list, act: Game.act, camera: Stage.camera, scene: Stage.scene, Board, BoardFx, Match3, Game, AI, Title, Results, Chrome, Help,
       oxAt: Bend.ox, psiAt: Bend.psi, forks: Forks.list, spawnFork: Forks.spawn,
       pause: v => { Main.paused = v; },
       setOdo: v => { Bend.odo = v; }, getOdo: () => Bend.odo,

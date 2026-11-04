@@ -83,7 +83,7 @@ const Game = {
     S.started = false; S.reveal = false;
     Game.queue.length = 0;
     Game.showIntents();
-    Hud.hideOver(); Hud.tallyHide();
+    Hud.hideOver(); Hud.tallyHide(); Help.close();
     Title.show();
   },
 

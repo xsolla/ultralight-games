@@ -12,6 +12,7 @@
 //          на его место (колонка flex, щель закрывается сама).
 //   Полный экран: переключает <html>, состояние читается из document.fullscreenElement, так что Esc и
 //          F11 тоже обновляют значок. Размеры пересчитывают ResizeObserver сцены и поля.
+//   Помощь "?": только в HUD, четвёртая снизу (своя для этой игры, в ../buttons.md её нет): окно "How to play" (help.js).
 // Кнопки лежат выше окна конца партии и титульного экрана (z-index), поэтому работают и там.
 // ============================================================================
 
@@ -40,6 +41,8 @@ const Chrome = {
           '<path d="M19.282 10.244 A6.4 6.4 0 1 1 10.718 10.244"/><path d="M15 6.6 L15 14.6"/></g>',
     fsEnter: '<g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">' +
              '<path d="M11.96 8.6 H8.6 V11.96"/><path d="M18.04 8.6 H21.4 V11.96"/><path d="M18.04 21.4 H21.4 V18.04"/><path d="M11.96 21.4 H8.6 V18.04"/></g>',
+    help: '<path d="M11.6 11.8 A3.4 3.4 0 1 1 16.6 14.8 C15.5 15.4 15 16.1 15 17.4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>' +
+          '<circle cx="15" cy="21" r="1.15" fill="currentColor"/>',
     fsExit: '<g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">' +
             '<path d="M8.6 11.96 H11.96 V8.6"/><path d="M21.4 11.96 H18.04 V8.6"/><path d="M21.4 18.04 H18.04 V21.4"/><path d="M8.6 18.04 H11.96 V21.4"/></g>',
   },
@@ -57,7 +60,7 @@ const Chrome = {
       Chrome.LOGO_PATHS.map(d => `<path fill-rule="evenodd" clip-rule="evenodd" d="${d}" fill="${Chrome.LOGO_FILL}"/>`).join('') + '</svg>';
 
     const col = document.getElementById('chrome');
-    for (const [name, action] of [['sound', Chrome.cycleSound], ['exit', () => Game.stop()], ['fullscreen', Chrome.toggleFullscreen]]) {
+    for (const [name, action] of [['sound', Chrome.cycleSound], ['exit', () => Game.stop()], ['fullscreen', Chrome.toggleFullscreen], ['help', () => Help.toggle()]]) {
       const b = document.createElement('button');
       b.type = 'button'; b.className = 'chrome-btn';
       b.addEventListener('click', e => { action(); b.blur(); e.stopPropagation(); });
@@ -66,6 +69,8 @@ const Chrome = {
     }
     Chrome.btn.exit.innerHTML = Chrome.svg(Chrome.ICONS.exit);    // значок выхода не меняется: рисуется один раз
     Chrome.label(Chrome.btn.exit, 'Exit to menu');
+    Chrome.btn.help.innerHTML = Chrome.svg(Chrome.ICONS.help);
+    Chrome.label(Chrome.btn.help, 'How to play');
     for (const ev of ['fullscreenchange', 'webkitfullscreenchange']) document.addEventListener(ev, Chrome.drawFullscreen);
     Chrome.drawSound(); Chrome.drawFullscreen();
   },
@@ -76,7 +81,7 @@ const Chrome = {
   // Выход виден только в игре (на титульном экране выходить некуда)
   // В игре колонка над светлым небом сцены, ей нужна тёмная подложка (css: #chrome.on-scene)
   setScreen(screen) {
-    Chrome.btn.exit.hidden = screen !== 'game';
+    Chrome.btn.exit.hidden = Chrome.btn.help.hidden = screen !== 'game';
     document.getElementById('chrome').classList.toggle('on-scene', screen === 'game');
   },
 

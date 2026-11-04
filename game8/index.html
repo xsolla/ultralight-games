@@ -72,7 +72,30 @@
       </div>
     </div>
 
-    <!-- Кнопки звука, выхода и полного экрана (chrome.js): выше всех окон, работают везде -->
+    <!-- Окно "How to play" (help.js): кнопка "?" в HUD -->
+    <div id="help">
+      <div id="help-box" class="help-box" role="dialog" aria-label="How to play">
+        <b class="help-title">How to play</b>
+        <!-- страница 1: цвета кристаллов и картинка ходов -->
+        <div id="help-p1" class="help-page">
+          <h3>What each crystal does</h3>
+          <div id="help-tiles"></div>
+          <h3>How your car moves</h3>
+          <canvas id="help-moves"></canvas>
+          <button id="help-next" class="help-btn" type="button">Page 2</button>
+        </div>
+        <!-- страница 2: ведение кристаллов, соперники, победа и поражение -->
+        <div id="help-p2" class="help-page" hidden>
+          <h3>Drag crystals</h3>
+          <p id="help-drag"></p>
+          <h3>Rivals, winning and losing</h3>
+          <p id="help-rules"></p>
+          <button id="help-close" class="help-btn" type="button">Got it</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Кнопки звука, выхода, полного экрана и помощи (chrome.js): выше всех окон, работают везде -->
     <div id="chrome"></div>
   </div>
 
@@ -106,6 +129,7 @@
   <script defer src="js/results.js"></script>
   <script defer src="js/chrome.js"></script>
   <script defer src="js/title.js"></script>
+  <script defer src="js/help.js"></script>
   <script defer src="js/input.js"></script>
   <script defer src="js/main.js"></script>
 </body>
