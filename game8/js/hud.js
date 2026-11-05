@@ -46,8 +46,8 @@ const Hud = {
     if (tally) Hud.tallyItems = CONFIG.MATCH3.TILES.map((t, type) => {
       const el = document.createElement('div');
       el.className = 'tally-item';
-      const icon = Crystals.sprite(type, CONFIG.MATCH3.TALLY.ICON_R, dpr);
-      icon.canvas.style.width = icon.canvas.style.height = icon.size + 'px';
+      const icon = Crystals.sprite(type, CONFIG.MATCH3.TALLY.ICON_R, dpr * CONFIG.MATCH3.TALLY.SHARP);   // с запасом на рост лидеров
+      el.style.setProperty('--icon', icon.size + 'px');                  // размер значка; лидеры растут от него (CSS)
       el.appendChild(icon.canvas);
       el.insertAdjacentHTML('beforeend', '<b>0</b>');
       tally.appendChild(el);
@@ -73,12 +73,18 @@ const Hud = {
     el.classList.remove('hit'); void el.offsetWidth; el.classList.add('hit');
   },
 
+  // Лидеры растут, как сработала бы пара сейчас (Match3.choose): срабатывают два самых многочисленных цвета.
+  // lead: цвет претендует на место в паре (его число не меньше второго по величине), sure: место за ним точно
+  // (больше третьего, то есть без равенства за место). Потерявший место сжимается обратно (переходы в CSS).
   tallyRender() {
-    const counts = Hud.tallyCounts, max = Math.max(...counts);
+    const counts = Hud.tallyCounts, vals = counts.filter(n => n > 0).sort((a, b) => b - a);
+    const second = vals[Math.min(1, vals.length - 1)], third = vals.length > 2 ? vals[2] : 0;
     Hud.tallyItems.forEach((el, i) => {
-      el.querySelector('b').textContent = counts[i];
-      el.classList.toggle('has', counts[i] > 0);
-      el.classList.toggle('lead', counts[i] > 0 && counts[i] === max);
+      const n = counts[i], lead = n > 0 && n >= second;
+      el.querySelector('b').textContent = n;
+      el.classList.toggle('has', n > 0);
+      el.classList.toggle('lead', lead);
+      el.classList.toggle('sure', lead && n > third);
       el.classList.remove('pick', 'win');
     });
   },
@@ -86,7 +92,7 @@ const Hud = {
   tallyHide() {
     if (!Hud.divider) return;
     Hud.divider.classList.remove('tally-mode');
-    for (const el of Hud.tallyItems) el.classList.remove('lead', 'pick', 'win', 'hit');
+    for (const el of Hud.tallyItems) el.classList.remove('lead', 'sure', 'pick', 'win', 'hit');
   },
 
   tallyOn: () => !!Hud.divider && Hud.divider.classList.contains('tally-mode'),
@@ -108,7 +114,7 @@ const Hud = {
         items.forEach((el, i) => el.classList.toggle('pick', i === candidates[(start + s) % n]));
       }, Util.easeOut);
     }
-    items.forEach((el, i) => { el.classList.remove('pick', 'lead'); el.classList.toggle('win', winners.includes(i)); });
+    items.forEach((el, i) => { el.classList.remove('pick', 'lead', 'sure'); el.classList.toggle('win', winners.includes(i)); });
     await Tween.wait(T.HOLD);
   },
 

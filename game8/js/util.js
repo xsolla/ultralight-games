@@ -37,6 +37,36 @@ const Util = {
     return b;
   },
 
+  // Нормали со сглаживанием по углу (для несвязанной геометрии вроде ExtrudeGeometry): в вершине усредняются
+  // нормали треугольников с тем же положением, которые отклонены от своего меньше чем на angle (радианы),
+  // так что скругления становятся гладкими, а острые кромки остаются острыми.
+  creaseNormals(geo, angle) {
+    const p = geo.attributes.position.array, n = p.length / 9, cos = Math.cos(angle);
+    const fn = new Float32Array(n * 3), groups = new Map(), key = i => `${p[i].toFixed(3)},${p[i + 1].toFixed(3)},${p[i + 2].toFixed(3)}`;
+    for (let t = 0; t < n; t++) {
+      const o = t * 9, ax = p[o + 3] - p[o], ay = p[o + 4] - p[o + 1], az = p[o + 5] - p[o + 2];
+      const bx = p[o + 6] - p[o], by = p[o + 7] - p[o + 1], bz = p[o + 8] - p[o + 2];
+      fn.set([ay * bz - az * by, az * bx - ax * bz, ax * by - ay * bx], t * 3);   // длина пропорциональна площади
+      for (let v = 0; v < 3; v++) { const k = key(o + v * 3); groups.has(k) ? groups.get(k).push(t) : groups.set(k, [t]); }
+    }
+    const unit = t => { const x = fn[t * 3], y = fn[t * 3 + 1], z = fn[t * 3 + 2], l = Math.hypot(x, y, z) || 1; return [x / l, y / l, z / l]; };
+    const out = new Float32Array(p.length);
+    for (let t = 0; t < n; t++) {
+      const [ux, uy, uz] = unit(t);
+      for (let v = 0; v < 3; v++) {
+        let sx = 0, sy = 0, sz = 0;
+        for (const u of groups.get(key(t * 9 + v * 3))) {
+          const [wx, wy, wz] = unit(u);
+          if (ux * wx + uy * wy + uz * wz >= cos) { sx += fn[u * 3]; sy += fn[u * 3 + 1]; sz += fn[u * 3 + 2]; }
+        }
+        const l = Math.hypot(sx, sy, sz) || 1;
+        out.set([sx / l, sy / l, sz / l], t * 9 + v * 3);
+      }
+    }
+    geo.setAttribute('normal', new THREE.BufferAttribute(out, 3));
+    return geo;
+  },
+
   // Новый canvas и его 2D-контекст
   canvas(w, h) {
     const c = document.createElement('canvas');

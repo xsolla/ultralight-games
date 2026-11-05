@@ -51,17 +51,28 @@ body { display: flex; align-items: center; justify-content: center; }
 }
 
 /* Счётчик цветов вместо HP: кристалл каждого цвета и сколько их схлопнулось в цепочке */
+#divider.tally-mode { position: relative; z-index: 2; }           /* выросшие лидеры выходят за разделитель поверх сцены и поля */
 #tally { display: none; flex: 1; height: 18px; align-items: center; justify-content: space-between; gap: 4px; }
 #divider.tally-mode #tally { display: flex; animation: tally-in .2s ease-out; }
 #divider.tally-mode .hp-label, #divider.tally-mode #hp-bar { display: none; }
 @keyframes tally-in { from { opacity: 0; transform: scale(.92); } to { opacity: 1; transform: none; } }
-.tally-item { display: flex; align-items: center; gap: 4px; opacity: .4; transition: transform .12s, opacity .12s, filter .12s; }
-.tally-item canvas { display: block; flex: none; }                  /* значок-кристалл, как на поле */
-.tally-item b { min-width: 11px; font-size: 13px; font-weight: 800; color: #fff; text-shadow: 0 1px 2px rgba(0, 0, 0, .9); }
+/* Лидеры растут настоящим размером значка (--icon задаёт hud.js), а не transform: соседи раздвигаются и не
+   перекрываются, а по высоте значок выходит за разделитель (#tally фиксированной высоты). Рост с перелётом
+   (пружинисто), сжатие обратно плавное. */
+.tally-item { display: flex; align-items: center; gap: 4px; opacity: .4; transition: opacity .12s, filter .22s; }
+.tally-item canvas { display: block; flex: none; width: var(--icon); height: var(--icon); transition: width .22s ease-out, height .22s ease-out; }
+.tally-item b { min-width: 11px; font-size: 13px; font-weight: 800; color: #fff; text-shadow: 0 1px 2px rgba(0, 0, 0, .9); transition: font-size .22s ease-out; }
 .tally-item.has { opacity: 1; }
-.tally-item.lead { transform: scale(1.18); }                       /* лидирует по числу */
-.tally-item.pick { opacity: 1; transform: scale(1.32); filter: drop-shadow(0 0 6px #fff); }          /* бегущий выбор при равенстве */
-.tally-item.win { opacity: 1; transform: scale(1.38); filter: drop-shadow(0 0 8px #ffd54a); }         /* выбранный цвет */
+.tally-item:is(.lead, .pick, .win) canvas { transition: width .3s cubic-bezier(.34, 1.7, .5, 1), height .3s cubic-bezier(.34, 1.7, .5, 1); }
+.tally-item.lead { filter: drop-shadow(0 0 4px rgba(255, 255, 255, .45)); }          /* претендует на место в паре (равенство) */
+.tally-item.lead canvas { width: calc(var(--icon) * 2); height: calc(var(--icon) * 2); }
+.tally-item.lead b { font-size: 16px; }
+.tally-item.sure { filter: drop-shadow(0 0 7px rgba(255, 255, 255, .7)); }           /* место в паре за ним */
+.tally-item:is(.sure, .pick) canvas { width: calc(var(--icon) * 2.6); height: calc(var(--icon) * 2.6); }
+.tally-item:is(.sure, .pick, .win) b { font-size: 19px; }
+.tally-item.pick { opacity: 1; filter: drop-shadow(0 0 7px #fff); }                  /* бегущий выбор при равенстве */
+.tally-item.win { opacity: 1; filter: drop-shadow(0 0 9px #ffd54a); }               /* выбранный цвет */
+.tally-item.win canvas { width: calc(var(--icon) * 2.9); height: calc(var(--icon) * 2.9); }
 /* долетела комета этого цвета: значок и число вспыхивают */
 .tally-item.hit canvas { animation: tally-hit .32s ease-out; }
 .tally-item.hit b { animation: tally-hit-num .32s ease-out; }
