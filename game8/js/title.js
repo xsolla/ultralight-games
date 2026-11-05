@@ -2,7 +2,8 @@
 // title.js — титульный экран: название, выбор сложности, окно лучших результатов. Лежит поверх всей
 // рамки (#title), за ним крутится сцена. Логотип Xsolla и кнопки звука и полного экрана даёт chrome.js.
 //
-// Сложность (CONFIG.DIFFICULTY) это шанс совсем случайного хода противника. Кнопка сложности ждёт,
+// Сложность (CONFIG.DIFFICULTY) это шанс совсем случайного хода противника и поблажка с цветом, который
+// игрок вёл (на Easy и Medium он срабатывает точно, если схлопнулся сразу). Кнопка сложности ждёт,
 // пока поле и ход успокоятся (если игрок вышел посреди хода), и запускает партию (Game.start).
 // Выход из партии (кнопка выхода, Game.stop) возвращает сюда.
 // ============================================================================
@@ -11,6 +12,7 @@ const Title = {
   LEVEL_NAME: { easy: 'Easy', medium: 'Medium', hard: 'Hard' },
   el: null, bestEl: null,
   starting: false,
+  secretStep: 0,     // сколько кристаллов пасхалки (UI.TITLE.SECRET) уже нажато по порядку
 
   init() {
     Title.el = document.getElementById('title');
@@ -21,11 +23,13 @@ const Title = {
       if (!CONFIG.MATCH3.TILES[type]) continue;
       const g = Crystals.sprite(type, CONFIG.UI.TITLE.GEM_R, dpr);
       g.canvas.style.width = g.canvas.style.height = g.size + 'px';
-      // скрытая функция (нигде не описана для игрока): кристалл задаёт тему дороги следующей партии, он коротко вспыхивает
-      const theme = CONFIG.UI.TITLE.GEM_THEME[CONFIG.MATCH3.TILES[type].id];
-      if (theme) g.canvas.addEventListener('click', () => {
-        Theme.force(theme);
-        g.canvas.classList.remove('picked'); void g.canvas.offsetWidth; g.canvas.classList.add('picked');
+      // скрытая функция (нигде не описана для игрока): кристалл задаёт тему дороги следующей партии, он коротко вспыхивает.
+      // Заодно идёт счёт пасхалки (Title.secret)
+      const id = CONFIG.MATCH3.TILES[type].id, theme = CONFIG.UI.TITLE.GEM_THEME[id];
+      g.canvas.addEventListener('click', () => {
+        if (theme) Theme.force(theme);
+        Title.flash(g.canvas);
+        Title.secret(id);
       });
       gems.appendChild(g.canvas);
     }
@@ -43,6 +47,20 @@ const Title = {
       `Lose: your car is wrecked or a rival gets more than ${CONFIG.RULES.LOSE_LEAD} rows ahead.`;
     document.getElementById('title-best').addEventListener('click', Title.openBest);
     document.getElementById('best-back').addEventListener('click', Title.closeBest);
+  },
+
+  flash(canvas) { canvas.classList.remove('picked'); void canvas.offsetWidth; canvas.classList.add('picked'); },
+
+  // Пасхалка: кристаллы нажаты по порядку UI.TITLE.SECRET, и трек меню меняется на MUSIC.SECRET (music.js).
+  // Неверный кристалл сбрасывает счёт (или начинает его заново, если это первый в порядке).
+  // Получилось: вспыхивают все кристаллы.
+  secret(id) {
+    const order = CONFIG.UI.TITLE.SECRET;
+    Title.secretStep = id === order[Title.secretStep] ? Title.secretStep + 1 : id === order[0] ? 1 : 0;
+    if (Title.secretStep < order.length) return;
+    Title.secretStep = 0;
+    Music.secret = true;
+    for (const c of document.querySelectorAll('#title-gems canvas')) Title.flash(c);
   },
 
   show() {

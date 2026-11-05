@@ -36,7 +36,8 @@ const Main = {
     BoardFx.init();
     Title.init();
     Help.init();
-    Game.reset();                                      // сцена с машинами за титульным экраном; партия начнётся с выбором сложности
+    Music.init();                                      // звучит после первого жеста игрока
+    Game.reset();                                     // сцена с машинами за титульным экраном; партия начнётся с выбором сложности
     Title.show();
 
     Main.last = performance.now();
@@ -48,6 +49,7 @@ const Main = {
     requestAnimationFrame(Main.frame);
     const dt = Math.min(0.05, (now - Main.last) / 1000); Main.last = now;
     if (!Main.paused) Main.update(dt);
+    Music.update(dt);                                  // музыка идёт и при остановленном мире
     Stage.render();
     Board.draw();
     BoardFx.draw();
@@ -81,7 +83,7 @@ const Main = {
   // requestAnimationFrame, поэтому есть ручной прогон кадров step(n).
   debugApi() {
     return {
-      CONFIG, G: Game.state, tweens: Tween.list, act: Game.act, camera: Stage.camera, scene: Stage.scene, Board, BoardFx, Match3, Game, AI, Title, Results, Chrome, Help, Theme, Weather,
+      CONFIG, G: Game.state, tweens: Tween.list, act: Game.act, camera: Stage.camera, scene: Stage.scene, Board, BoardFx, Match3, Game, AI, Title, Results, Chrome, Help, Theme, Weather, Music,
       oxAt: Bend.ox, psiAt: Bend.psi, forks: Forks.list, spawnFork: Forks.spawn,
       pause: v => { Main.paused = v; },
       setOdo: v => { Bend.odo = v; }, getOdo: () => Bend.odo,

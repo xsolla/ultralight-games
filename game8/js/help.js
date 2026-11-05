@@ -40,10 +40,12 @@ const Help = {
       tiles.appendChild(row);
     }
     const D = CONFIG.MATCH3.DRAG, R = CONFIG.RULES;
+    const easy = CONFIG.DIFFICULTY.ORDER.filter(l => CONFIG.DIFFICULTY.LEVELS[l].GUARANTEE).map(l => Title.LEVEL_NAME[l]).join(' and ');
     document.getElementById('help-drag').textContent =
       `Press a crystal and drag it around the board, straight or diagonally. Every crystal it passes swaps places with it. ` +
       `Let go, or wait ${D.TIME} seconds, and every line of ${CONFIG.MATCH3.MIN_MATCH} or more same-colored crystals clears, ` +
-      `in any direction, diagonals included. Falling crystals can clear more lines.`;
+      `in any direction, diagonals included. Falling crystals can clear more lines.` +
+      (easy ? ` On ${easy}, if the color you dragged clears right when you let go, it is sure to fire (a ring marks it).` : '');
     document.getElementById('help-rules').textContent =
       `After your move every rival moves. A ram costs the attacker ${R.RAM_DAMAGE_SELF} HP and the target ${R.RAM_DAMAGE_TARGET} HP; ` +
       `a car at 0 HP flies off the track. You win when no rival is in sight: all wrecked or at least ${R.WIN_BEHIND} rows behind. ` +

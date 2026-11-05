@@ -152,7 +152,7 @@ const Board = {
     Board.animating = true;
     d.tile.x = d.x; d.tile.y = d.y;
     await Board.glide(d.tile, CONFIG.MATCH3.DRAG.DROP);
-    if (d.moved) await Board.resolve();
+    if (d.moved) await Board.resolve(d.tile.type);
     Board.animating = false;
   },
 
@@ -167,18 +167,21 @@ const Board = {
   // ---- ход ----
   // Поле после ведения: вся цепочка схлопываний (с каскадами) считается по цветам и даёт один ход
   // (одну или две команды). Нет ни одной линии: ход потрачен впустую (DRAG.EMPTY_SKIP).
-  async resolve() {
+  // held это цвет, который вели. Поблажка (MATCH3.GUARANTEE, лёгкие сложности): если он есть среди первого же
+  // схлопывания, этот цвет срабатывает точно (sure), а выбирается только второй.
+  async resolve(held) {
     let cells = Match3.find(Board.tiles);
     if (!cells.length) { if (CONFIG.MATCH3.DRAG.EMPTY_SKIP) Game.play(['S']); return; }
+    const sure = CONFIG.MATCH3.GUARANTEE && cells.some(([r, c]) => Board.tiles[r][c].type === held) ? held : -1;
     const counts = Array(CONFIG.MATCH3.TILES.length).fill(0), flights = [], spot = [0, 0, 0];
     while (cells.length) {
-      Board.count(cells, counts, flights, spot);
+      Board.count(cells, counts, flights, spot, sure);
       await Board.clearAnim(cells);
       await Board.refill();
       cells = Match3.find(Board.tiles);
     }
     await Promise.all(flights);                           // все кометы долетели до счётчика
-    await Board.decide(counts, [spot[0] / spot[2], spot[1] / spot[2]]);
+    await Board.decide(counts, [spot[0] / spot[2], spot[1] / spot[2]], sure);
     Board.snap();
   },
 
@@ -186,24 +189,26 @@ const Board = {
   // HP в разделителе заменяется счётчиком: то, что схлопнулось раньше, он показывает сразу, а из кристаллов
   // этого шага в него летят кометы (BoardFx.comet), каждая прибавляет 1. Их Promise копятся в flights.
   // В spot копятся [сумма x, сумма y, число] схлопнутых кристаллов: оттуда взлетает цвет, если он один.
-  count(cells, counts, flights, spot) {
+  // sure: гарантированный цвет (или -1), счётчик показывает его большим и в кольце.
+  count(cells, counts, flights, spot, sure) {
     const before = counts.slice();
     for (const [r, c] of cells) {
       const t = Board.tiles[r][c];
       counts[t.type]++; spot[0] += t.x; spot[1] += t.y; spot[2]++;
     }
     if (counts.filter(n => n > 0).length < 2) return;
-    if (!Hud.tallyOn()) Hud.tallyShow(before);
+    if (!Hud.tallyOn()) Hud.tallyShow(before, sure);
     for (const [r, c] of cells) { const t = Board.tiles[r][c]; flights.push(BoardFx.comet(t.type, t.x, t.y)); }
   },
 
   // Итог цепочки: один цвет срабатывает сразу, а если цветов несколько, срабатывают два самых
-  // многочисленных ОДНОВРЕМЕННО (Match3.choose). Если выбор случайный, счётчик это показывает.
+  // многочисленных ОДНОВРЕМЕННО (Match3.choose; с гарантированным цветом sure он и лучший из остальных).
+  // Если выбор случайный, счётчик это показывает.
   // Потом выбранные кристаллы взлетают из счётчика в сцену (BoardFx.reveal), HP возвращается, и, как только
   // они показались, команды уходят в игру одним ходом (кристаллы растворяются уже во время хода).
   // Если цвет был один, он так же взлетает, но из середины схлопнутых кристаллов (from, точка поля).
-  async decide(counts, from) {
-    const pick = Match3.choose(counts);
+  async decide(counts, from, sure) {
+    const pick = Match3.choose(counts, sure);
     if (!pick.winners.length) return;
     if (counts.filter(n => n > 0).length > 1) {
       if (pick.candidates) { Game.state.log = 'Tie: random pick'; Hud.refresh(); }

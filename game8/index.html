@@ -104,7 +104,7 @@
   <!-- Порядок выполнения: модуль three, затем обычные скрипты по зависимостям. Модуль и defer-скрипты
        выполняются по порядку в документе, так что к main.js THREE уже есть.
        constants -> util, tween -> сцена и камера -> мир (изгиб, дорога, обочина, развилки)
-       -> сущности (машины, значки, эффекты) -> правила, поведение противников и поле match-3 -> интерфейс (HUD, результаты, кнопки, титульный экран) и ввод -> main. -->
+       -> сущности (машины, значки, эффекты) -> правила, поведение противников и поле match-3 -> интерфейс (HUD, результаты, кнопки, титульный экран, помощь), музыка и ввод -> main. -->
   <script type="module">
     import * as THREE from 'three';
     window.THREE = THREE;
@@ -134,6 +134,7 @@
   <script defer src="js/chrome.js"></script>
   <script defer src="js/title.js"></script>
   <script defer src="js/help.js"></script>
+  <script defer src="js/music.js"></script>
   <script defer src="js/input.js"></script>
   <script defer src="js/main.js"></script>
 </body>

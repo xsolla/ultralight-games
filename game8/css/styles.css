@@ -73,6 +73,15 @@ body { display: flex; align-items: center; justify-content: center; }
 .tally-item.pick { opacity: 1; filter: drop-shadow(0 0 7px #fff); }                  /* бегущий выбор при равенстве */
 .tally-item.win { opacity: 1; filter: drop-shadow(0 0 9px #ffd54a); }               /* выбранный цвет */
 .tally-item.win canvas { width: calc(var(--icon) * 2.9); height: calc(var(--icon) * 2.9); }
+/* гарантированный цвет (поблажка лёгких сложностей): кольцо вокруг кристалла, пульсирует. Значок с запасом
+   на свечение, поэтому кольцо утоплено внутрь (outline-offset), ближе к самому кристаллу */
+.tally-item.locked canvas { border-radius: 50%; outline: 2px solid #ffe27a; outline-offset: calc(var(--icon) * -.36); animation: tally-lock 1.1s ease-in-out infinite; }
+.tally-item.locked.win canvas { outline-offset: calc(var(--icon) * -.4); }
+.tally-item.locked.hit canvas { animation: tally-hit .32s ease-out, tally-lock 1.1s ease-in-out infinite; }   /* вспышка от кометы не гасит кольцо */
+@keyframes tally-lock {
+  0%, 100% { outline-color: #ffd54a; outline-width: 2px; }
+  50%      { outline-color: #fff3b8; outline-width: 3px; }
+}
 /* долетела комета этого цвета: значок и число вспыхивают */
 .tally-item.hit canvas { animation: tally-hit .32s ease-out; }
 .tally-item.hit b { animation: tally-hit-num .32s ease-out; }

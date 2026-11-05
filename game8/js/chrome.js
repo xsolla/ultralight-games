@@ -8,7 +8,8 @@
 // со <script> за XSS).
 //
 //   Звук: три состояния on -> musicoff -> off -> on (музыка и эффекты / только эффекты / тишина). Одно на
-//         титульный экран и HUD, запоминается в localStorage (CONFIG.SOUND_KEY). Звуков в игре пока нет.
+//         титульный экран и HUD, запоминается в localStorage (CONFIG.SOUND_KEY). Музыка (music.js) звучит
+//         только в "on"; звуковых эффектов в игре пока нет.
 //   Выход: только в HUD, возвращает на титульный экран (Game.stop). На титуле скрыт, полный экран встаёт
 //          на его место (колонка flex, щель закрывается сама).
 //   Полный экран: переключает <html>, состояние читается из document.fullscreenElement, так что Esc и
@@ -108,6 +109,7 @@ const Chrome = {
     Chrome.sound = Chrome.SOUND_NEXT[Chrome.sound];
     try { localStorage.setItem(CONFIG.SOUND_KEY, Chrome.sound); } catch (e) { /* не запомнится, но работает */ }
     Chrome.drawSound();
+    Music.sync();                                        // музыка звучит только в "on"
   },
 
   drawSound() {

@@ -96,11 +96,17 @@ const CONFIG = {
   },
 
   // ---- Сложность (выбор на титульном экране, title.js) ---------------------------
-  // Сложность это шанс совсем случайного хода противника (ENEMIES.AI.RANDOM_CHANCE): чем он выше, тем чаще
-  // противники ошибаются. Game.start ставит его из LEVELS.
+  // Сложность (Game.start ставит из LEVELS):
+  //   RANDOM шанс совсем случайного хода противника (ENEMIES.AI.RANDOM_CHANCE): чем он выше, тем чаще противники ошибаются;
+  //   GUARANTEE поблажка (MATCH3.GUARANTEE): если цвет, который игрок вёл, схлопнулся в первом же схлопывании
+  //   после того, как он отпустил кристалл, этот цвет точно срабатывает, случай выбирает только второй.
   DIFFICULTY: {
     ORDER: ['easy', 'medium', 'hard'],
-    LEVELS: { easy: 0.33, medium: 0.18, hard: 0 },
+    LEVELS: {
+      easy:   { RANDOM: 0.2, GUARANTEE: true },
+      medium: { RANDOM: 0,   GUARANTEE: true },
+      hard:   { RANDOM: 0,   GUARANTEE: false },
+    },
   },
 
   // ---- Лучшие результаты (results.js) ------------------------------------------
@@ -108,6 +114,24 @@ const CONFIG = {
   // если осталось больше HP.
   RESULTS: { KEY: 'puzzleracing_results', KEPT: 3 },
   SOUND_KEY: 'puzzleracing_sound',   // состояние кнопки звука (chrome.js)
+
+  // ---- Музыка (music.js) --------------------------------------------------------
+  // У титульного экрана свой трек, в партии трек темы дороги (THEMES.ORDER), все по кругу. Файлы в DIR.
+  // VOLUME громкость, FADE секунды на затухание старого трека и нарастание нового.
+  MUSIC: {
+    DIR: 'assets/bgm/',
+    MENU: 'puzzle_and_racing_title_screen.mp3',
+    THEMES: {
+      day:     'puzzle_and_racing_midday_hot_race.mp3',
+      night:   'puzzle_and_racing_deep_night_race.mp3',
+      winter:  'puzzle_and_racing_freezing_race.mp3',
+      rain:    'puzzle_and_racing_rainy_evening_race.mp3',
+      sunrise: 'puzzle_and_racing_sunrise_morning_race.mp3',
+    },
+    // Пасхалка: нажать кристаллы над названием по порядку UI.TITLE.SECRET, и вместо MENU до конца сессии звучит SECRET
+    SECRET: 'puzzle_and_races_come_back_home_to_me.mp3',
+    VOLUME: 0.55, FADE: 1.2,
+  },
 
   // ---- Поле match-3 -----------------------------------------------------------
   // Ход как в Puzzle & Dragons: взять кристалл и вести его по полю (DRAG). Каждый кристалл на пути меняется с
@@ -161,6 +185,7 @@ const CONFIG = {
     DIRECTIONS: [[0, 1], [1, 0], [1, 1], [1, -1]],   // горизонталь, вертикаль, две диагонали
     OPPOSITE: { F: 'B', B: 'F', L: 'R', R: 'L' },    // противоположные команды: в паре дёргают машину на месте (фиолетовый и синий тоже: F и B)
     BACK_AVOID: 0.75,         // поблажка: случайный выбор между тормозом (B) и другими цветами выбирает другие с таким шансом
+    GUARANTEE: false,         // цвет, который вели, если схлопнулся сразу, срабатывает точно; ставит Game.start из DIFFICULTY
     TILE_SIZE: 0.84,          // диаметр кристалла в долях клетки
     // Ведение кристалла (board.js). Время в секундах.
     DRAG: {
@@ -478,7 +503,9 @@ const CONFIG = {
     // как часто кнопка сложности проверяет, доигран ли брошенный ход
     TITLE: { GEMS: [1, 0, 4, 2, 5], GEM_R: 13, WAIT: 0.05,
       // скрытая функция: нажатие на кристалл над названием задаёт тему дороги следующей партии (по id кристалла)
-      GEM_THEME: { green: 'day', teal: 'winter', yellow: 'sunrise', red: 'rain', purple: 'night' } },
+      GEM_THEME: { green: 'day', teal: 'winter', yellow: 'sunrise', red: 'rain', purple: 'night' },
+      // пасхалка: порядок нажатий (id кристаллов), после которого трек меню меняется на MUSIC.SECRET
+      SECRET: ['yellow', 'red', 'purple', 'green', 'teal'] },
     // Окно "How to play" (help.js): радиус значков в списке цветов; картинка ходов (px): сторона (наибольшая и
     // наименьшая, она уменьшается, чтобы страница влезла без прокрутки), радиусы кристаллов (одиночный и в паре),
     // машина, на сколько стрелка не доходит до центра клетки (одиночный, пара)

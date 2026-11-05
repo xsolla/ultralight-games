@@ -69,11 +69,13 @@ const Game = {
     Hud.refresh();
   },
 
-  // Новая партия на сложности level (с титульного экрана): шанс совсем случайного хода противника
+  // Новая партия на сложности level (с титульного экрана): шанс совсем случайного хода противника и
+  // поблажка с цветом, который вели (CONFIG.DIFFICULTY)
   start(level) {
-    const S = Game.state;
+    const S = Game.state, L = CONFIG.DIFFICULTY.LEVELS[level];
     S.level = level;
-    CONFIG.ENEMIES.AI.RANDOM_CHANCE = CONFIG.DIFFICULTY.LEVELS[level];
+    CONFIG.ENEMIES.AI.RANDOM_CHANCE = L.RANDOM;
+    CONFIG.MATCH3.GUARANTEE = L.GUARANTEE;
     S.started = true;
     Game.reset(); Board.reset();
   },

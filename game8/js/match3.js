@@ -42,9 +42,11 @@ const Match3 = {
   // Если на место в паре претендуют несколько равных, выбор случайный, но противоположные пары
   // (F и B, L и R) исключаются, пока есть другие. Поблажка игроку: если случай выбирает между вариантами
   // с тормозом (B) и без, варианты без тормоза вместе выпадают с шансом BACK_AVOID.
+  // sure: гарантированный цвет (поблажка MATCH3.GUARANTEE) или -1. Если он схлопнулся, он срабатывает точно,
+  // а второй выбирается по тем же правилам среди остальных (больше всех, при равенстве случай без противоположных).
   // Возвращает { winners, candidates, landing }: winners это один или два цвета, candidates это среди кого
   // шёл случайный выбор (или null), landing это на ком выбор остановился (для показа).
-  choose(counts) {
+  choose(counts, sure = -1) {
     const M = CONFIG.MATCH3, cmd = t => [...M.TILES[t].command];
     const opposite = (a, b) => cmd(a).some(x => cmd(b).includes(M.OPPOSITE[x]));   // у цвета может быть несколько команд
     const back = t => cmd(t).includes('B');
@@ -57,7 +59,7 @@ const Match3 = {
     if (types.length <= 1) return { winners: types, candidates: null, landing: null };
 
     const max = Math.max(...types.map(t => counts[t]));
-    const top = types.filter(t => counts[t] === max);
+    const top = counts[sure] > 0 ? [sure] : types.filter(t => counts[t] === max);   // гарантированный цвет как единственный лидер
     if (top.length === 2) return { winners: top, candidates: null, landing: null };
 
     if (top.length >= 3) {                                     // равны три цвета и больше: случайная пара

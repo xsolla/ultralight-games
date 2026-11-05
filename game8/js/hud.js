@@ -28,6 +28,7 @@ const Hud = {
   divider: null, hpFill: null, hpText: null,
   tallyItems: [],    // по одному элементу на цвет кристалла
   tallyCounts: [],   // числа, которые сейчас показывает счётчик
+  tallySure: -1,     // гарантированный цвет этой цепочки (поблажка MATCH3.GUARANTEE) или -1
 
   init() {
     Hud.el = document.getElementById('hud');
@@ -58,10 +59,12 @@ const Hud = {
   // ---- Счётчик цветов (вместо HP, пока в цепочке больше одного цвета) ----
   // counts[i] это сколько кристаллов цвета i схлопнулось за цепочку. Дальше к счёту прибавляют кометы
   // (BoardFx.comet), долетая до значка своего цвета (tallyAdd).
-  tallyShow(counts) {
+  // sure: гарантированный цвет (или -1): он сразу большой и в кольце, место в паре за ним.
+  tallyShow(counts, sure = -1) {
     if (!Hud.divider) return;
     Hud.divider.classList.add('tally-mode');
     Hud.tallyCounts = counts.slice();
+    Hud.tallySure = sure;
     Hud.tallyRender();
   },
 
@@ -74,17 +77,21 @@ const Hud = {
   },
 
   // Лидеры растут, как сработала бы пара сейчас (Match3.choose): срабатывают два самых многочисленных цвета.
-  // lead: цвет претендует на место в паре (его число не меньше второго по величине), sure: место за ним точно
-  // (больше третьего, то есть без равенства за место). Потерявший место сжимается обратно (переходы в CSS).
+  // lead: цвет претендует на место в паре (его число не меньше последнего места), sure: место за ним точно
+  // (больше следующего, то есть без равенства за место). Потерявший место сжимается обратно (переходы в CSS).
+  // Гарантированный цвет (tallySure) занимает одно место сам (sure и кольцо locked), остальные борются за второе.
   tallyRender() {
-    const counts = Hud.tallyCounts, vals = counts.filter(n => n > 0).sort((a, b) => b - a);
-    const second = vals[Math.min(1, vals.length - 1)], third = vals.length > 2 ? vals[2] : 0;
+    // гарантированный цвет точно в цепочке (схлопнулся первым), так что он крупный сразу, ещё до своих комет
+    const counts = Hud.tallyCounts, g = Hud.tallySure, locked = g >= 0, slots = locked ? 1 : 2;
+    const vals = counts.filter((n, i) => n > 0 && !(locked && i === g)).sort((a, b) => b - a);
+    const last = vals[Math.min(slots, vals.length) - 1], next = vals.length > slots ? vals[slots] : 0;
     Hud.tallyItems.forEach((el, i) => {
-      const n = counts[i], lead = n > 0 && n >= second;
+      const n = counts[i], own = locked && i === g, lead = own || (n > 0 && n >= last);
       el.querySelector('b').textContent = n;
-      el.classList.toggle('has', n > 0);
+      el.classList.toggle('has', n > 0 || own);
       el.classList.toggle('lead', lead);
-      el.classList.toggle('sure', lead && n > third);
+      el.classList.toggle('sure', own || (lead && n > next));
+      el.classList.toggle('locked', own);
       el.classList.remove('pick', 'win');
     });
   },
@@ -92,7 +99,8 @@ const Hud = {
   tallyHide() {
     if (!Hud.divider) return;
     Hud.divider.classList.remove('tally-mode');
-    for (const el of Hud.tallyItems) el.classList.remove('lead', 'sure', 'pick', 'win', 'hit');
+    for (const el of Hud.tallyItems) el.classList.remove('lead', 'sure', 'locked', 'pick', 'win', 'hit');
+    Hud.tallySure = -1;
   },
 
   tallyOn: () => !!Hud.divider && Hud.divider.classList.contains('tally-mode'),
